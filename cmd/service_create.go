@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"devspace/internal/config"
+	"devspace/internal/templates"
 	"fmt"
 	"os"
 
@@ -71,5 +72,18 @@ var createCmd = &cobra.Command{
 		fmt.Println("Backend : %s\n", backend)
 		fmt.Println("Frontend : %s\n", frontend)
 
+		meta := templates.ProjectMetadata{
+			ServiceName : serviceName,
+			Backend : backend,
+			Frontend : frontend,
+			GitHubUser :"patel-jay",
+		}
+
+		err = templates.GenerateBoilerplate(meta)
+		if err != nil {
+			fmt.Printf("Generation Failed: %v\n", err)
+			return
+		}
+		fmt.Println("You'r customizable, ready-made microservice architeture is ready to launch!")
 	},
 }

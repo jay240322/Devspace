@@ -10,7 +10,7 @@ type Config struct {
 }
 
 func LoadConfig() (*Config,error){
-	token := 0s.Getenv("GITHUB_TOKEN")
+	token := os.Getenv("GITHUB_TOKEN")
 	if token == ""{
 		return nil, errors.New("Authentication missing: Please set the GITHUB_TOKEN environment variable")
 	}

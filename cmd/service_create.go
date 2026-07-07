@@ -5,6 +5,7 @@ import (
 	"devspace/internal/templates"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/manifoldco/promptui"
 	"github.com/spf13/cobra"
@@ -30,6 +31,24 @@ var createCmd = &cobra.Command{
 		pathPrompt := promptui.Prompt{
 			Label: "Enter full path destination where microservice should be built(use . for curent directory)",
 		    Default: ".",
+			Validate: func(input string)error {
+				if input == "." {
+					return nil
+				}
+				cleanPath := filepath.Clean(input)
+				
+				info, err := os.Stat(cleanPath)
+				if os.IsNotExist(err){
+					return fmt.Errorf("❌ Path does not exit! please enter valid path")
+				}
+				if err != nil {
+					return fmt.Errorf("❌ Error readng path: %v",err)
+				}
+				if !info.IsDir(){
+					return fmt.Errorf("❌ Target path is a file, not a folder")
+				}
+				return nil
+			},
 		}
 		targetDir, err := pathPrompt.Run()
 		if err != nil {

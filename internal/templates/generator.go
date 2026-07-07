@@ -9,6 +9,7 @@ import (
 )
 
 type ProjectMetadata struct {
+	TargetDir   string
 	ServiceName string
 	Backend     string
 	Frontend    string
@@ -16,7 +17,7 @@ type ProjectMetadata struct {
 }
 
 func GenerateBoilerplate(meta ProjectMetadata) error {
-	basePath := meta.ServiceName
+	basePath := filepath.Join(meta.TargetDir,meta.ServiceName)
 	backendPath := filepath.Join(basePath, "backend")
 	frontendPath := filepath.Join(basePath, "frontend")
 

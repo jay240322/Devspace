@@ -26,6 +26,16 @@ var createCmd = &cobra.Command{
 			fmt.Println("Run 'set GITHUB_TOKEN=your_token' in terminal before running this tool")
 			os.Exit(1)
 		}
+		//input for custom folder path destination
+		pathPrompt := promptui.Prompt{
+			Label: "Enter full path destination where microservice should be built(use . for curent directory)",
+		    Default: ".",
+		}
+		targetDir, err := pathPrompt.Run()
+		if err != nil {
+			fmt.Println("Prompt failed: %v\n", err)
+			return
+		}
         // input for service name
 		namePrompt := promptui.Prompt{
 			Label: "Enter microservice name",
@@ -68,11 +78,13 @@ var createCmd = &cobra.Command{
 		}
         // plan Summay Output
 		fmt.Println("\n -- Full-stack plan Created Successfully!\n")
+		fmt.Println("Path: %s\n", targetDir)
 		fmt.Println("Service Name: %s\n", serviceName)
 		fmt.Println("Backend : %s\n", backend)
 		fmt.Println("Frontend : %s\n", frontend)
 
 		meta := templates.ProjectMetadata{
+			TargetDir : targetDir,
 			ServiceName : serviceName,
 			Backend : backend,
 			Frontend : frontend,

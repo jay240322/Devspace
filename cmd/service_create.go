@@ -5,6 +5,7 @@ import (
 	"devspace/internal/templates"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/manifoldco/promptui"
 	"github.com/spf13/cobra"
@@ -25,6 +26,34 @@ var createCmd = &cobra.Command{
 			fmt.Println("Security validation failed: %v\n", err)
 			fmt.Println("Run 'set GITHUB_TOKEN=your_token' in terminal before running this tool")
 			os.Exit(1)
+		}
+		//input for custom folder path destination
+		pathPrompt := promptui.Prompt{
+			Label: "Enter full path destination where microservice should be built(use . for curent directory)",
+		    Default: ".",
+			Validate: func(input string)error {
+				if input == "." {
+					return nil
+				}
+				cleanPath := filepath.Clean(input)
+				
+				info, err := os.Stat(cleanPath)
+				if os.IsNotExist(err){
+					return fmt.Errorf("❌ Path does not exit! please enter valid path")
+				}
+				if err != nil {
+					return fmt.Errorf("❌ Error readng path: %v",err)
+				}
+				if !info.IsDir(){
+					return fmt.Errorf("❌ Target path is a file, not a folder")
+				}
+				return nil
+			},
+		}
+		targetDir, err := pathPrompt.Run()
+		if err != nil {
+			fmt.Println("Prompt failed: %v\n", err)
+			return
 		}
         // input for service name
 		namePrompt := promptui.Prompt{
@@ -68,11 +97,13 @@ var createCmd = &cobra.Command{
 		}
         // plan Summay Output
 		fmt.Println("\n -- Full-stack plan Created Successfully!\n")
+		fmt.Println("Path: %s\n", targetDir)
 		fmt.Println("Service Name: %s\n", serviceName)
 		fmt.Println("Backend : %s\n", backend)
 		fmt.Println("Frontend : %s\n", frontend)
 
 		meta := templates.ProjectMetadata{
+			TargetDir : targetDir,
 			ServiceName : serviceName,
 			Backend : backend,
 			Frontend : frontend,

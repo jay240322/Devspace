@@ -17,52 +17,48 @@ type ProjectMetadata struct {
 }
 
 func GenerateBoilerplate(meta ProjectMetadata) error {
-	basePath := filepath.Join(meta.TargetDir,meta.ServiceName)
+	basePath := filepath.Join(meta.TargetDir, meta.ServiceName)
 	backendPath := filepath.Join(basePath, "backend")
 	frontendPath := filepath.Join(basePath, "frontend")
 
-	// Create physical folders
+	// 1. Physically construct directories
 	if err := os.MkdirAll(backendPath, 0755); err != nil {
 		return err
 	}
+
+	// 2. Dynamically route to the correct isolated Backend File
+	switch meta.Backend {
+	case "Python (Django)":
+		GeneratePythonBackend(backendPath, meta)
+	case "Node.js (Express)":
+		GenerateNodeBackend(backendPath, meta)
+	case "Rust (Actix-web)":
+		GenerateRustBackend(backendPath, meta)
+	default:
+		GenerateGoBackend(backendPath, meta)
+	}
+
+	// 3. Dynamically route to the correct isolated Frontend File
 	if meta.Frontend != "None (Pure Backend API)" {
-		if err := os.MkdirAll(frontendPath, 0755); err != nil {
-			return err
-		}
+		frontendSrcPath := filepath.Join(frontendPath, "src")
+		_ = os.MkdirAll(frontendSrcPath, 0755)
+		GenerateFrontendFramework(frontendPath, frontendSrcPath, meta)
 	}
 
-	// Ready-made dockerfile blueprint using BACKTICKS (``) for multi-line support
-	dockerfileBlueprint := `FROM golang:1.22-alpine AS builder
-WORKDIR /app
-COPY go.mod ./
-RUN go mod download
-COPY . .
-RUN go build -o main .
+	fmt.Printf("\n✨ Successfully populated dynamic structure inside: %s\n", basePath)
+	return nil
+}
 
-FROM alpine:latest
-WORKDIR /root/
-COPY --from=builder /app/main .
-EXPOSE 8080
-CMD ["./main"]
-# Provisioned securely via DevSpace for github.com/{{.GitHubUser}}/{{.ServiceName}}`
-
-	// Compile the dockerfile blueprint and inject the real user variables
-	tmpl, err := template.New("dockerfile").Parse(dockerfileBlueprint)
+// Shared helper utility to process dynamic injection maps
+func writeTemplate(targetFilePath string, blueprint string, meta ProjectMetadata) error {
+	tmpl, err := template.New(filepath.Base(targetFilePath)).Parse(blueprint)
 	if err != nil {
-		return fmt.Errorf("failed to parse dockerfile template: %v", err)
+		return fmt.Errorf("failed to parse template: %v", err)
 	}
-
 	var processedCode bytes.Buffer
 	if err := tmpl.Execute(&processedCode, meta); err != nil {
-		return fmt.Errorf("failed to inject variables: %v", err)
+		return err
 	}
-
-	// Write out the target file
-	targetFile := filepath.Join(backendPath, "Dockerfile")
-	if err := os.WriteFile(targetFile, processedCode.Bytes(), 0644); err != nil {
-		return fmt.Errorf("failed to write generated file: %v", err)
-	}
-
-	fmt.Printf("✅ Generated personalized Dockerfile at %s\n", targetFile)
-	return nil
+	_ = os.MkdirAll(filepath.Dir(targetFilePath), 0755)
+	return os.WriteFile(targetFilePath, processedCode.Bytes(), 0644)
 }

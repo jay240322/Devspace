@@ -1,79 +1,51 @@
 package templates
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 )
 
-func GenerateFrontendFramework(frontendPath string, srcPath string, meta ProjectMetadata) {
-	var pkg, appCode, appName, mainJs string
-	var mainFileName string = "main.js"
+func GenerateFrontendFramework(frontendPath string, _ string, meta ProjectMetadata) {
+	fmt.Printf("📦 Initializing official ecosystem CLI setup for %s...\n", meta.Frontend)
 
-	switch meta.Frontend {
-	case "Vue.Js":
-		appName = "App.vue"
-		pkg = `{ "name": "vue-app", "type": "module", "dependencies": { "vue": "^3.4.0" }, "devDependencies": { "vite": "^5.0.0", "@vitejs/plugin-vue": "^5.0.0" } }`
-		mainJs = `import { createApp } from 'vue'
-import App from './App.vue'
+	parentDir := filepath.Dir(frontendPath) 
+	folderName := "frontend"                
 
-createApp(App).mount('#root')`
-		appCode = `<template>
-  <div style="padding:40px; text-align:center;">
-    <h1>{{.ServiceName}} Vue App</h1>
-  </div>
-</template>`
-
-	case "Svelte":
-		appName = "App.svelte"
-		pkg = `{ "name": "svelte-app", "type": "module", "dependencies": { "svelte": "^4.0.0" }, "devDependencies": { "vite": "^5.0.0", "@sveltejs/vite-plugin-svelte": "^3.0.0" } }`
-		mainJs = `import App from './App.svelte'
-
-const app = new App({
-  target: document.getElementById('root')
-})
-
-export default app`
-		appCode = `<script></script>
-<div style="padding:40px; text-align:center;">
-  <h1>✨ {{.ServiceName}} Svelte App</h1>
-</div>`
-
-	default: // React (Vite)
-		appName = "App.jsx"
-		mainFileName = "main.jsx" 
-		pkg = `{ "name": "react-app", "type": "module", "dependencies": { "react": "^18.3.1", "react-dom": "^18.3.1" }, "devDependencies": { "vite": "^5.3.1", "@vitejs/plugin-react": "^4.3.1" } }`
-		mainJs = `import React from 'react'
-import { createRoot } from 'react-dom/client'
-import App from './App.jsx'
-
-createRoot(document.getElementById('root')).render(<App />)`
-		appCode = `import React from 'react'
-
-export default function App() {
-  return (
-    <div style={{padding:'40px', textAlign:'center'}}>
-      <h1> {{.ServiceName}} React App</h1>
-    </div>
-  )
-}`
+	// Fix Windows Executable Extensions (.cmd)
+	npmCmd := "npm"
+	npxCmd := "npx"
+	if runtime.GOOS == "windows" {
+		npmCmd = "npm.cmd"
+		npxCmd = "npx.cmd"
 	}
 
-	// Dynamic multi-line HTML blueprint compilation
-	html := `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>{{.ServiceName}} Platform</title>
-  </head>
-  <body style="background-color: #121214; color: #e1e1e6; font-family: sans-serif;">
-    <div id="root"></div>
-    <script type="module" src="/src/` + mainFileName + `"></script>
-  </body>
-</html>`
+	var cmd *exec.Cmd
 
-	_ = writeTemplate(filepath.Join(frontendPath, "package.json"), pkg, meta)
-	_ = writeTemplate(filepath.Join(frontendPath, "index.html"), html, meta)
-	_ = os.WriteFile(filepath.Join(srcPath, mainFileName), []byte(mainJs), 0644)
-	_ = writeTemplate(filepath.Join(srcPath, appName), appCode, meta)
+	switch meta.Frontend {
+	case "Next.js (React)":
+		cmd = exec.Command(npxCmd, "create-next-app@latest", folderName, "--ts=false", "--src-dir=true", "--eslint=true", "--tailwind=false", "--app=true", "--import-alias", "@/*", "--use-npm")
+
+	case "Vue.Js":
+		cmd = exec.Command(npmCmd, "create", "vite@latest", folderName, "--", "--template", "vue")
+
+	case "Svelte":
+		cmd = exec.Command(npxCmd, "sv", "create", folderName, "--template", "minimal", "--no-types", "--no-add-ons", "--no-install")
+	default: // React (Vite)
+		cmd = exec.Command(npmCmd, "create", "vite@latest", folderName, "--", "--template", "react")
+	}
+
+	cmd.Dir = parentDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err := cmd.Run()
+	if err != nil {
+		fmt.Printf("❌ Failed to scaffold frontend via CLI execution: %v\n", err)
+		return
+	}
+
+	fmt.Printf("✅ Official %s project skeleton generated perfectly inside /frontend!\n", meta.Frontend)
 }

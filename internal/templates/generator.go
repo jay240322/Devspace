@@ -19,13 +19,8 @@ type ProjectMetadata struct {
 func GenerateBoilerplate(meta ProjectMetadata) error {
 	basePath := filepath.Join(meta.TargetDir, meta.ServiceName)
 
-<<<<<<< Updated upstream
-	// 1. Physically construct directories
-	if err := os.MkdirAll(backendPath, 0755); err != nil {
-=======
 	// 1. Physically construct the root service directory
 	if err := os.MkdirAll(basePath, 0755); err != nil {
->>>>>>> Stashed changes
 		return err
 	}
 
@@ -41,21 +36,13 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 		GenerateGoBackend(basePath, meta)
 	}
 
-<<<<<<< Updated upstream
-	// 3. Dynamically route to the correct isolated Frontend File
-	if meta.Frontend != "None (Pure Backend API)" {
-		frontendSrcPath := filepath.Join(frontendPath, "src")
-		_ = os.MkdirAll(frontendSrcPath, 0755)
-		GenerateFrontendFramework(frontendPath, frontendSrcPath, meta)
-=======
-	// 3. Launch the Automated Frontend CLIs
+	// 3. Let the frontend CLI handle its own folder creation cleanly
 	if meta.Frontend != "None (Pure Backend API)" {
 		frontendPath := filepath.Join(basePath, "frontend")
 		GenerateFrontendFramework(frontendPath, "", meta)
->>>>>>> Stashed changes
 	}
 
-	// 4. DYNAMIC ADVANCED STEP: Generate full-stack Dockerfile on the fly
+	// 4. Generate custom full-stack Dockerfile on the fly
 	err := generateDynamicDockerfile(basePath, meta)
 	if err != nil {
 		fmt.Printf("⚠️  Dockerfile compilation skipped: %v\n", err)
@@ -69,9 +56,9 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 func generateDynamicDockerfile(basePath string, meta ProjectMetadata) error {
 	var dockerfileContent string
 
-	// Step A: Append Frontend Builder Stage if a frontend exists
+	// Step A: Append Frontend Builder Stage if a frontend exists (Explicitly stating the language name)
 	if meta.Frontend != "None (Pure Backend API)" {
-		dockerfileContent += `# --- Stage 1: Dynamic Frontend Builder Layer ---
+		dockerfileContent += fmt.Sprintf(`# --- Stage 1: Dynamic Frontend Builder Layer (%s) ---
 FROM node:20-alpine AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
@@ -79,13 +66,13 @@ RUN npm install
 COPY frontend/ ./
 RUN npm run build --if-present
 
-`
+`, meta.Frontend)
 	}
 
 	// Step B: Append the exact tailored Backend deployment environment stage
 	switch meta.Backend {
 	case "Python (Django)":
-		dockerfileContent += `# --- Stage 2: Python Production Environment ---
+		dockerfileContent += `# --- Stage 2: Python Django Production Environment ---
 FROM python:3.11-slim
 WORKDIR /app
 RUN pip install django django-cors-headers
@@ -97,7 +84,7 @@ COPY backend/ ./backend/
 		dockerfileContent += "EXPOSE 8080\nCMD [\"python\", \"backend/manage.py\", \"runserver\", \"0.0.0.0:8080\"]"
 
 	case "Node.js (Express)":
-		dockerfileContent += `# --- Stage 2: Nodejs Production Runtime ---
+		dockerfileContent += `# --- Stage 2: Nodejs Express Production Runtime ---
 FROM node:20-alpine
 WORKDIR /app
 COPY backend/package*.json ./backend/
@@ -110,7 +97,7 @@ COPY backend/ ./backend/
 		dockerfileContent += "EXPOSE 8080\nCMD [\"node\", \"backend/index.js\"]"
 
 	case "Rust (Actix-web)":
-		dockerfileContent += `# --- Stage 2: Rust Compiled Binary Stage ---
+		dockerfileContent += `# --- Stage 2: Rust Actix Compiled Binary Stage ---
 FROM rust:1.75 as backend-builder
 WORKDIR /app
 COPY backend/ ./backend/

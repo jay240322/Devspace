@@ -21,7 +21,7 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 	backendPath := filepath.Join(basePath, "backend")
 	frontendPath := filepath.Join(basePath, "frontend")
 
-	// 1. Physically construct directories
+	// 1. Physically construct the backend directory
 	if err := os.MkdirAll(backendPath, 0755); err != nil {
 		return err
 	}
@@ -38,11 +38,10 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 		GenerateGoBackend(backendPath, meta)
 	}
 
-	// 3. Dynamically route to the correct isolated Frontend File
+	// 3. FIXED: Removed manual directory creation so the CLI has a clear path
 	if meta.Frontend != "None (Pure Backend API)" {
-		frontendSrcPath := filepath.Join(frontendPath, "src")
-		_ = os.MkdirAll(frontendSrcPath, 0755)
-		GenerateFrontendFramework(frontendPath, frontendSrcPath, meta)
+		// Pass an empty string for the second argument since the CLI generates its own layout
+		GenerateFrontendFramework(frontendPath, "", meta)
 	}
 
 	fmt.Printf("\n✨ Successfully populated dynamic structure inside: %s\n", basePath)

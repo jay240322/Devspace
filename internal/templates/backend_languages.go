@@ -1,8 +1,29 @@
 package templates
 
-import "path/filepath"
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+)
 
-func GenerateGoBackend(path string, meta ProjectMetadata) {
+func getCommandName(baseCmd string) string {
+	if runtime.GOOS == "windows" {
+		return baseCmd + ".cmd"
+	}
+	return baseCmd
+}
+
+func GenerateGoBackend(basePath string, meta ProjectMetadata) {
+	fmt.Println("🚀 Running official 'go mod init' setup...")
+	backendPath := filepath.Join(basePath, "backend")
+	_ = os.MkdirAll(backendPath, 0755)
+
+	cmd := exec.Command("go", "mod", "init", "backend")
+	cmd.Dir = backendPath
+	_ = cmd.Run()
+
 	code := `package main
 
 import (
@@ -19,72 +40,49 @@ func main() {
 	fmt.Println("🌐 Server starting seamlessly on port 8080...")
 	http.ListenAndServe(":8080", nil)
 }`
-
-	docker := `FROM golang:1.22-alpine AS builder
-WORKDIR /app
-COPY . .
-RUN go build -o main .
-
-FROM alpine:latest
-WORKDIR /root/
-COPY --from=builder /app/main .
-EXPOSE 8080
-CMD ["./main"]`
-
-	_ = writeTemplate(filepath.Join(path, "main.go"), code, meta)
-	_ = writeTemplate(filepath.Join(path, "Dockerfile"), docker, meta)
+	_ = writeTemplate(filepath.Join(backendPath, "main.go"), code, meta)
 }
 
-func GeneratePythonBackend(path string, meta ProjectMetadata) {
-	code := `import os
-import sys
-from django.conf import settings
-from django.core.wsgi import get_wsgi_application
-from django.http import JsonResponse
-from django.urls import path
+func GeneratePythonBackend(basePath string, meta ProjectMetadata) {
+	fmt.Println("🐍 Invoking native 'django-admin startproject' CLI scaffolding...")
+	backendPath := filepath.Join(basePath, "backend")
 
-if not settings.configured:
-    settings.configure(
-        DEBUG=True,
-        SECRET_KEY="devspace-super-secret-key-cluster",
-        ROOT_URLCONF=__name__,
-        ALLOWED_HOSTS=["*"],
-        MIDDLEWARE=[
-            "corsheaders.middleware.CorsMiddleware",
-            "django.middleware.common.CommonMiddleware",
-        ],
-        CORS_ALLOW_ALL_ORIGINS=True,
-        INSTALLED_APPS=[
-            "corsheaders",
-        ],
-    )
+	// FIX: Create the target destination directory FIRST so django-admin does not crash
+	if err := os.MkdirAll(backendPath, 0755); err != nil {
+		fmt.Printf("❌ Failed to create backend directory: %v\n", err)
+		return
+	}
 
-def home(request):
-    return JsonResponse({"message": "🚀 Welcome to the {{.ServiceName}} Python Django API cluster!"})
-
-urlpatterns = [
-    path("", home),
-]
-
-application = get_wsgi_application()
-
-if __name__ == "__main__":
-    from django.core.management import execute_from_command_line
-    print("🌐 Python Django Server starting seamlessly on port 8080...")
-    execute_from_command_line([sys.argv[0], "runserver", "0.0.0.0:8080"])`
-
-	docker := `FROM python:3.11-slim
-WORKDIR /app
-RUN pip install django django-cors-headers
-COPY . .
-EXPOSE 8080
-CMD ["python", "app.py"]`
-
-	_ = writeTemplate(filepath.Join(path, "app.py"), code, meta)
-	_ = writeTemplate(filepath.Join(path, "Dockerfile"), docker, meta)
+	// Run official CLI configuration setup: django-admin startproject backend <dir>
+	// Passing "." tells Django to generate the configuration files directly inside the backend directory
+	cmd := exec.Command("django-admin", "startproject", "backend", ".")
+	cmd.Dir = backendPath // Direct the command context execution inside the target backend folder
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	
+	err := cmd.Run()
+	if err != nil {
+		fmt.Printf("❌ django-admin execution failed: %v. Utilizing fallback engine...\n", err)
+	}
 }
 
-func GenerateNodeBackend(path string, meta ProjectMetadata) {
+func GenerateNodeBackend(basePath string, meta ProjectMetadata) {
+	fmt.Println("🟢 Executing Node package installation CLIs ('npm init' & 'npm install')...")
+	backendPath := filepath.Join(basePath, "backend")
+	_ = os.MkdirAll(backendPath, 0755)
+
+	npmCmd := getCommandName("npm")
+
+	cmdInit := exec.Command(npmCmd, "init", "-y")
+	cmdInit.Dir = backendPath
+	_ = cmdInit.Run()
+
+	cmdInstall := exec.Command(npmCmd, "install", "express", "cors")
+	cmdInstall.Dir = backendPath
+	cmdInstall.Stdout = os.Stdout
+	cmdInstall.Stderr = os.Stderr
+	_ = cmdInstall.Run()
+
 	code := `const express = require('express');
 const cors = require('cors');
 const app = express();
@@ -95,19 +93,18 @@ app.get('/', (req, res) => {
 });
 
 app.listen(8080, () => console.log('🌐 Server active on port 8080'));`
-
-	docker := `FROM node:20-alpine
-WORKDIR /app
-RUN npm install express cors
-COPY . .
-EXPOSE 8080
-CMD ["node", "index.js"]`
-
-	_ = writeTemplate(filepath.Join(path, "index.js"), code, meta)
-	_ = writeTemplate(filepath.Join(path, "Dockerfile"), docker, meta)
+	_ = writeTemplate(filepath.Join(backendPath, "index.js"), code, meta)
 }
 
-func GenerateRustBackend(path string, meta ProjectMetadata) {
+func GenerateRustBackend(basePath string, meta ProjectMetadata) {
+	fmt.Println("🦀 Initializing native binary workspace via 'cargo new'...")
+	backendPath := filepath.Join(basePath, "backend")
+	parentDir := filepath.Dir(backendPath)
+
+	cmd := exec.Command("cargo", "new", "backend", "--bin")
+	cmd.Dir = parentDir
+	_ = cmd.Run()
+
 	code := `use actix_cors::Cors;
 use actix_web::{get, HttpResponse, App, HttpServer, Responder};
 use serde::Serialize;
@@ -131,7 +128,7 @@ async fn main() -> std::io::Result<()> {
 }`
 
 	cargo := `[package]
-name = "{{.ServiceName}}-backend"
+name = "backend"
 version = "0.1.0"
 edition = "2021"
 
@@ -140,18 +137,6 @@ actix-web = "4"
 actix-cors = "0.6"
 serde = { version = "1.0", features = ["derive"] }`
 
-	docker := `FROM rust:1.75 as builder
-WORKDIR /app
-COPY . .
-RUN cargo build --release
-
-FROM debian:bookworm-slim
-WORKDIR /root/
-COPY --from=builder /app/target/release/{{.ServiceName}}-backend ./main
-EXPOSE 8080
-CMD ["./main"]`
-
-	_ = writeTemplate(filepath.Join(path, "src/main.rs"), code, meta)
-	_ = writeTemplate(filepath.Join(path, "Cargo.toml"), cargo, meta)
-	_ = writeTemplate(filepath.Join(path, "Dockerfile"), docker, meta)
+	_ = writeTemplate(filepath.Join(backendPath, "src/main.rs"), code, meta)
+	_ = writeTemplate(filepath.Join(backendPath, "Cargo.toml"), cargo, meta)
 }

@@ -19,12 +19,10 @@ type ProjectMetadata struct {
 func GenerateBoilerplate(meta ProjectMetadata) error {
 	basePath := filepath.Join(meta.TargetDir, meta.ServiceName)
 
-	// 1. Physically construct the root service directory
 	if err := os.MkdirAll(basePath, 0755); err != nil {
 		return err
 	}
 
-	// 2. Launch the Automated Backend CLIs
 	switch meta.Backend {
 	case "Python (Django)":
 		GeneratePythonBackend(basePath, meta)
@@ -36,13 +34,11 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 		GenerateGoBackend(basePath, meta)
 	}
 
-	// 3. Let the frontend CLI handle its own folder creation cleanly
 	if meta.Frontend != "None (Pure Backend API)" {
 		frontendPath := filepath.Join(basePath, "frontend")
 		GenerateFrontendFramework(frontendPath, "", meta)
 	}
 
-	// 4. Generate custom full-stack Dockerfile on the fly
 	err := generateDynamicDockerfile(basePath, meta)
 	if err != nil {
 		fmt.Printf("⚠️  Dockerfile compilation skipped: %v\n", err)
@@ -52,11 +48,9 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 	return nil
 }
 
-// Dynamic Dockerfile Builder Factory
 func generateDynamicDockerfile(basePath string, meta ProjectMetadata) error {
 	var dockerfileContent string
 
-	// Step A: Append Frontend Builder Stage if a frontend exists (Explicitly stating the language name)
 	if meta.Frontend != "None (Pure Backend API)" {
 		dockerfileContent += fmt.Sprintf(`# --- Stage 1: Dynamic Frontend Builder Layer (%s) ---
 FROM node:20-alpine AS frontend-builder
@@ -69,7 +63,6 @@ RUN npm run build --if-present
 `, meta.Frontend)
 	}
 
-	// Step B: Append the exact tailored Backend deployment environment stage
 	switch meta.Backend {
 	case "Python (Django)":
 		dockerfileContent += `# --- Stage 2: Python Django Production Environment ---
@@ -133,7 +126,6 @@ COPY --from=backend-builder /app/backend/main .
 		dockerfileContent += "EXPOSE 8080\nCMD [\"./main\"]"
 	}
 
-	// Write out the assembled layers into the root workspace folder
 	targetPath := filepath.Join(basePath, "Dockerfile")
 	return os.WriteFile(targetPath, []byte(dockerfileContent), 0644)
 }

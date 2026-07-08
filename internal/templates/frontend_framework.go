@@ -26,13 +26,15 @@ func GenerateFrontendFramework(frontendPath string, _ string, meta ProjectMetada
 
 	switch meta.Frontend {
 	case "Next.js (React)":
-		cmd = exec.Command(npxCmd, "create-next-app@latest", folderName, "--ts=false", "--src-dir=true", "--eslint=true", "--tailwind=false", "--app=true", "--import-alias", "@/*", "--use-npm")
+		// Preserving your working automated parameters
+		cmd = exec.Command(npxCmd, "create-next-app@latest", folderName, "--js", "--src-dir", "--eslint", "--no-tailwind", "--app", "--import-alias", "@/*", "--use-npm")
 
 	case "Vue.Js":
 		cmd = exec.Command(npmCmd, "create", "vite@latest", folderName, "--", "--template", "vue")
 
 	case "Svelte":
 		cmd = exec.Command(npxCmd, "sv", "create", folderName, "--template", "minimal", "--no-types", "--no-add-ons", "--no-install")
+        
 	default: // React (Vite)
 		cmd = exec.Command(npmCmd, "create", "vite@latest", folderName, "--", "--template", "react")
 	}

@@ -17,12 +17,20 @@ type ProjectMetadata struct {
 }
 
 func GenerateBoilerplate(meta ProjectMetadata) error {
+	// If TargetDir is empty, default to current directory safely
+	if meta.TargetDir == "" {
+		meta.TargetDir = "."
+	}
+
+	// This cleanly joins your custom target path and service folder name
 	basePath := filepath.Join(meta.TargetDir, meta.ServiceName)
 
+	// 1. Physically construct the root service directory
 	if err := os.MkdirAll(basePath, 0755); err != nil {
 		return err
 	}
 
+	// 2. Launch the Automated Backend CLIs
 	switch meta.Backend {
 	case "Python (Django)":
 		GeneratePythonBackend(basePath, meta)
@@ -34,11 +42,13 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 		GenerateGoBackend(basePath, meta)
 	}
 
+	// 3. Let the frontend CLI handle its own folder creation cleanly
 	if meta.Frontend != "None (Pure Backend API)" {
 		frontendPath := filepath.Join(basePath, "frontend")
 		GenerateFrontendFramework(frontendPath, "", meta)
 	}
 
+	// 4. Generate custom full-stack Dockerfile on the fly at the ROOT level
 	err := generateDynamicDockerfile(basePath, meta)
 	if err != nil {
 		fmt.Printf("⚠️  Dockerfile compilation skipped: %v\n", err)
@@ -48,6 +58,7 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 	return nil
 }
 
+// Dynamic Dockerfile Builder Factory
 func generateDynamicDockerfile(basePath string, meta ProjectMetadata) error {
 	var dockerfileContent string
 
@@ -124,6 +135,16 @@ COPY --from=backend-builder /app/backend/main .
 			dockerfileContent += "COPY --from=frontend-builder /app/frontend/dist ./public\n"
 		}
 		dockerfileContent += "EXPOSE 8080\nCMD [\"./main\"]"
+	}
+
+	// Add dynamic footer signature using text/template parsing
+	footerBlueprint := "\n\n# Provisioned securely via DevSpace for github.com/{{.GitHubUser}}/{{.ServiceName}}"
+	tmpl, err := template.New("footer").Parse(footerBlueprint)
+	if err == nil {
+		var processedFooter bytes.Buffer
+		if err := tmpl.Execute(&processedFooter, meta); err == nil {
+			dockerfileContent += processedFooter.String()
+		}
 	}
 
 	targetPath := filepath.Join(basePath, "Dockerfile")

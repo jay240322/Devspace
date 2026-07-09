@@ -9,6 +9,7 @@ import (
 )
 
 type ProjectMetadata struct {
+	TargetDir   string
 	ServiceName string
 	Backend     string
 	Frontend    string
@@ -16,52 +17,149 @@ type ProjectMetadata struct {
 }
 
 func GenerateBoilerplate(meta ProjectMetadata) error {
-	basePath := meta.ServiceName
-	backendPath := filepath.Join(basePath, "backend")
-	frontendPath := filepath.Join(basePath, "frontend")
+	// If TargetDir is empty, default to current directory safely
+	if meta.TargetDir == "" {
+		meta.TargetDir = "."
+	}
 
-	// Create physical folders
-	if err := os.MkdirAll(backendPath, 0755); err != nil {
+	// This cleanly joins your custom target path and service folder name
+	basePath := filepath.Join(meta.TargetDir, meta.ServiceName)
+
+	// 1. Physically construct the root service directory
+	if err := os.MkdirAll(basePath, 0755); err != nil {
 		return err
 	}
+
+	// 2. Launch the Automated Backend CLIs
+	switch meta.Backend {
+	case "Python (Django)":
+		GeneratePythonBackend(basePath, meta)
+	case "Node.js (Express)":
+		GenerateNodeBackend(basePath, meta)
+	case "Rust (Actix-web)":
+		GenerateRustBackend(basePath, meta)
+	default:
+		GenerateGoBackend(basePath, meta)
+	}
+
+	// 3. Let the frontend CLI handle its own folder creation cleanly
 	if meta.Frontend != "None (Pure Backend API)" {
-		if err := os.MkdirAll(frontendPath, 0755); err != nil {
-			return err
+		frontendPath := filepath.Join(basePath, "frontend")
+		GenerateFrontendFramework(frontendPath, "", meta)
+	}
+
+	// 4. Generate custom full-stack Dockerfile on the fly at the ROOT level
+	err := generateDynamicDockerfile(basePath, meta)
+	if err != nil {
+		fmt.Printf("⚠️  Dockerfile compilation skipped: %v\n", err)
+	}
+
+	fmt.Printf("\n✨ Successfully populated dynamic structure inside: %s\n", basePath)
+	return nil
+}
+
+// Dynamic Dockerfile Builder Factory
+func generateDynamicDockerfile(basePath string, meta ProjectMetadata) error {
+	var dockerfileContent string
+
+	if meta.Frontend != "None (Pure Backend API)" {
+		dockerfileContent += fmt.Sprintf(`# --- Stage 1: Dynamic Frontend Builder Layer (%s) ---
+FROM node:20-alpine AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm install
+COPY frontend/ ./
+RUN npm run build --if-present
+
+`, meta.Frontend)
+	}
+
+	switch meta.Backend {
+	case "Python (Django)":
+		dockerfileContent += `# --- Stage 2: Python Django Production Environment ---
+FROM python:3.11-slim
+WORKDIR /app
+RUN pip install django django-cors-headers
+COPY backend/ ./backend/
+`
+		if meta.Frontend != "None (Pure Backend API)" {
+			dockerfileContent += "COPY --from=frontend-builder /app/frontend/dist ./frontend/dist\n"
+		}
+		dockerfileContent += "EXPOSE 8080\nCMD [\"python\", \"backend/manage.py\", \"runserver\", \"0.0.0.0:8080\"]"
+
+	case "Node.js (Express)":
+		dockerfileContent += `# --- Stage 2: Nodejs Express Production Runtime ---
+FROM node:20-alpine
+WORKDIR /app
+COPY backend/package*.json ./backend/
+RUN cd backend && npm install
+COPY backend/ ./backend/
+`
+		if meta.Frontend != "None (Pure Backend API)" {
+			dockerfileContent += "COPY --from=frontend-builder /app/frontend/dist ./backend/public\n"
+		}
+		dockerfileContent += "EXPOSE 8080\nCMD [\"node\", \"backend/index.js\"]"
+
+	case "Rust (Actix-web)":
+		dockerfileContent += `# --- Stage 2: Rust Actix Compiled Binary Stage ---
+FROM rust:1.75 as backend-builder
+WORKDIR /app
+COPY backend/ ./backend/
+WORKDIR /app/backend
+RUN cargo build --release
+
+# --- Stage 3: Minimal Linux Execution Core ---
+FROM debian:bookworm-slim
+WORKDIR /root/
+COPY --from=backend-builder /app/backend/target/release/backend ./main
+`
+		if meta.Frontend != "None (Pure Backend API)" {
+			dockerfileContent += "COPY --from=frontend-builder /app/frontend/dist ./public\n"
+		}
+		dockerfileContent += "EXPOSE 8080\nCMD [\"./main\"]"
+
+	default: // Go (Golang)
+		dockerfileContent += `# --- Stage 2: Go Binary Builder Stage ---
+FROM golang:1.22-alpine AS backend-builder
+WORKDIR /app
+COPY backend/ ./backend/
+WORKDIR /app/backend
+RUN go build -o main .
+
+# --- Stage 3: Lightweight Alpine Deployment Core ---
+FROM alpine:latest
+WORKDIR /root/
+COPY --from=backend-builder /app/backend/main .
+`
+		if meta.Frontend != "None (Pure Backend API)" {
+			dockerfileContent += "COPY --from=frontend-builder /app/frontend/dist ./public\n"
+		}
+		dockerfileContent += "EXPOSE 8080\nCMD [\"./main\"]"
+	}
+
+	// Add dynamic footer signature using text/template parsing
+	footerBlueprint := "\n\n# Provisioned securely via DevSpace for github.com/{{.GitHubUser}}/{{.ServiceName}}"
+	tmpl, err := template.New("footer").Parse(footerBlueprint)
+	if err == nil {
+		var processedFooter bytes.Buffer
+		if err := tmpl.Execute(&processedFooter, meta); err == nil {
+			dockerfileContent += processedFooter.String()
 		}
 	}
 
-	// Ready-made dockerfile blueprint using BACKTICKS (``) for multi-line support
-	dockerfileBlueprint := `FROM golang:1.22-alpine AS builder
-WORKDIR /app
-COPY go.mod ./
-RUN go mod download
-COPY . .
-RUN go build -o main .
+	targetPath := filepath.Join(basePath, "Dockerfile")
+	return os.WriteFile(targetPath, []byte(dockerfileContent), 0644)
+}
 
-FROM alpine:latest
-WORKDIR /root/
-COPY --from=builder /app/main .
-EXPOSE 8080
-CMD ["./main"]
-# Provisioned securely via DevSpace for github.com/{{.GitHubUser}}/{{.ServiceName}}`
-
-	// Compile the dockerfile blueprint and inject the real user variables
-	tmpl, err := template.New("dockerfile").Parse(dockerfileBlueprint)
+func writeTemplate(targetFilePath string, blueprint string, meta ProjectMetadata) error {
+	tmpl, err := template.New(filepath.Base(targetFilePath)).Parse(blueprint)
 	if err != nil {
-		return fmt.Errorf("failed to parse dockerfile template: %v", err)
+		return fmt.Errorf("failed to parse template: %v", err)
 	}
-
 	var processedCode bytes.Buffer
 	if err := tmpl.Execute(&processedCode, meta); err != nil {
-		return fmt.Errorf("failed to inject variables: %v", err)
+		return err
 	}
-
-	// Write out the target file
-	targetFile := filepath.Join(backendPath, "Dockerfile")
-	if err := os.WriteFile(targetFile, processedCode.Bytes(), 0644); err != nil {
-		return fmt.Errorf("failed to write generated file: %v", err)
-	}
-
-	fmt.Printf("✅ Generated personalized Dockerfile at %s\n", targetFile)
-	return nil
+	_ = os.MkdirAll(filepath.Dir(targetFilePath), 0755)
+	return os.WriteFile(targetFilePath, processedCode.Bytes(), 0644)
 }

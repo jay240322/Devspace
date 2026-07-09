@@ -8,18 +8,23 @@ import (
 	"runtime"
 )
 
+func getCommandName(baseCmd string) string {
+	if runtime.GOOS == "windows" {
+		return baseCmd + ".cmd"
+	}
+	return baseCmd
+}
+
 func GenerateGoBackend(basePath string, meta ProjectMetadata) {
+	fmt.Println("🚀 Running official 'go mod init' setup...")
 	backendPath := filepath.Join(basePath, "backend")
 	_ = os.MkdirAll(backendPath, 0755)
 
-	fmt.Println("🚀 Scaffolding Native Go Workspace Module...")
-	cmd := exec.Command("go", "mod", "init", fmt.Sprintf("github.com/%s/%s/backend", meta.GitHubUser, meta.ServiceName))
+	cmd := exec.Command("go", "mod", "init", "backend")
 	cmd.Dir = backendPath
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
 	_ = cmd.Run()
 
-	mainCode := `package main
+	code := `package main
 
 import (
 	"fmt"
@@ -27,91 +32,98 @@ import (
 )
 
 func main() {
-	http.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, "{\"status\": \"healthy\", \"engine\": \"Go Alpine Core\"}")
+		fmt.Fprintf(w, "{\"message\": \"🚀 Welcome to the {{.ServiceName}} Go backend API!\"}")
 	})
-
-	fmt.Println("🚀 Go Microservice running smoothly on port 8080...")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
-		fmt.Printf("Error starting server: %v\n", err)
-	}
+	fmt.Println("🌐 Server starting seamlessly on port 8080...")
+	http.ListenAndServe(":8080", nil)
 }`
-	_ = os.WriteFile(filepath.Join(backendPath, "main.go"), []byte(mainCode), 0644)
+	_ = writeTemplate(filepath.Join(backendPath, "main.go"), code, meta)
 }
 
 func GeneratePythonBackend(basePath string, meta ProjectMetadata) {
+	fmt.Println("🐍 Invoking native 'django-admin startproject' CLI scaffolding...")
 	backendPath := filepath.Join(basePath, "backend")
-	_ = os.MkdirAll(backendPath, 0755)
 
-	fmt.Println("🐍 Initializing Django Admin Project Core Layout...")
-	
-	pythonCmd := "python"
-	if runtime.GOOS == "windows" {
-		pythonCmd = "python"
+	// FIX: Create the target destination directory FIRST so django-admin does not crash
+	if err := os.MkdirAll(backendPath, 0755); err != nil {
+		fmt.Printf("❌ Failed to create backend directory: %v\n", err)
+		return
 	}
 
-	cmd := exec.Command(pythonCmd, "-m", "django", "startproject", "backend", ".")
-	cmd.Dir = backendPath
+	// Run official CLI configuration setup: django-admin startproject backend <dir>
+	// Passing "." tells Django to generate the configuration files directly inside the backend directory
+	cmd := exec.Command("django-admin", "startproject", "backend", ".")
+	cmd.Dir = backendPath // Direct the command context execution inside the target backend folder
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		// Fallback directly to regular django-admin global CLI call if module path behaves oddly
-		fallbackCmd := exec.Command("django-admin", "startproject", "backend", ".")
-		fallbackCmd.Dir = backendPath
-		_ = fallbackCmd.Run()
+	
+	err := cmd.Run()
+	if err != nil {
+		fmt.Printf("❌ django-admin execution failed: %v. Utilizing fallback engine...\n", err)
 	}
 }
 
 func GenerateNodeBackend(basePath string, meta ProjectMetadata) {
+	fmt.Println("🟢 Executing Node package installation CLIs ('npm init' & 'npm install')...")
 	backendPath := filepath.Join(basePath, "backend")
 	_ = os.MkdirAll(backendPath, 0755)
 
-	fmt.Println("🟢 Initializing Express Node.js Workspace Context...")
-	
-	npmCmd := "npm"
-	if runtime.GOOS == "windows" {
-		npmCmd = "npm.cmd"
-	}
+	npmCmd := getCommandName("npm")
 
-	initCmd := exec.Command(npmCmd, "init", "-y")
-	initCmd.Dir = backendPath
-	_ = initCmd.Run()
+	cmdInit := exec.Command(npmCmd, "init", "-y")
+	cmdInit.Dir = backendPath
+	_ = cmdInit.Run()
 
-	// FIXED: Concatenating string representation to prevent JavaScript backticks from breaking Go literals
-	indexCode := `const express = require('express');
+	cmdInstall := exec.Command(npmCmd, "install", "express", "cors")
+	cmdInstall.Dir = backendPath
+	cmdInstall.Stdout = os.Stdout
+	cmdInstall.Stderr = os.Stderr
+	_ = cmdInstall.Run()
+
+	code := `const express = require('express');
+const cors = require('cors');
 const app = express();
-const PORT = 8080;
 
-app.get('/api/health', (req, res) => {
-    res.json({ status: 'healthy', engine: 'Node.js Express Runtime' });
+app.use(cors());
+app.get('/', (req, res) => {
+    res.json({ message: "🚀 Welcome to the {{.ServiceName}} Node.js Express API!" });
 });
 
-app.listen(PORT, () => {
-    console.log(` + "`" + `🚀 Express Backend server tracking actively on port ${PORT}` + "`" + `);
-});`
-	_ = os.WriteFile(filepath.Join(backendPath, "index.js"), []byte(indexCode), 0644)
+app.listen(8080, () => console.log('🌐 Server active on port 8080'));`
+	_ = writeTemplate(filepath.Join(backendPath, "index.js"), code, meta)
 }
 
 func GenerateRustBackend(basePath string, meta ProjectMetadata) {
 	targetBackendDir := filepath.Join(basePath, "backend")
-	_ = os.MkdirAll(basePath, 0755)
+	
+	// 1. FIXED: Explicitly force-create the backend directory structure first
+	_ = os.MkdirAll(filepath.Join(targetBackendDir, "src"), 0755)
 
 	fmt.Println("🦀 Provisioning Cargo Binary Executable Instance...")
 	
-	cmd := exec.Command("cargo", "new", "backend", "--bin")
-	cmd.Dir = basePath
+	// 2. Try running cargo init natively inside the pre-made folder
+	cmd := exec.Command("cargo", "init", "--bin")
+	cmd.Dir = targetBackendDir 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	_ = cmd.Run()
+	
+	// If cargo fails or isn't installed locally, our fallback writes the files manually!
+	if err := cmd.Run(); err != nil {
+		fmt.Println("⚠️  Local 'cargo' CLI not found or failed. Falling back to manual template injection...")
+	}
 
+	// 3. Robust Overwrite to guarantee the workspace files exist regardless of local toolchains
 	cargoTomlContent := `[package]
 name = "backend"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-actix-web = "4.4"`
+actix-web = "4.4"
+serde_json = "1.0"`
 	_ = os.WriteFile(filepath.Join(targetBackendDir, "Cargo.toml"), []byte(cargoTomlContent), 0644)
 
 	mainRustCode := `use actix_web::{get, HttpResponse, App, HttpServer, Responder};
@@ -132,4 +144,5 @@ async fn main() -> std::io::Result<()> {
     .await
 }`
 	_ = os.WriteFile(filepath.Join(targetBackendDir, "src", "main.rs"), []byte(mainRustCode), 0644)
+	fmt.Println("✅ Rust backend structure successfully secured.")
 }

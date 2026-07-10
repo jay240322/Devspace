@@ -6,14 +6,19 @@ import (
 	"os"
 	"path/filepath"
 	"text/template"
+	"devspace/internal/templates/k8s"
 )
 
 type ProjectMetadata struct {
-	TargetDir   string
-	ServiceName string
-	Backend     string
-	Frontend    string
-	GitHubUser  string
+	TargetDir      string
+	ServiceName    string
+	Backend        string
+	Frontend       string
+	GitHubUser     string
+	K8sReplicas    int
+	K8sServiceType string
+	K8sCpuRequest  string // ✅ Fixed typo: added missing 'u'
+	K8sMemRequest  string 
 }
 
 func GenerateBoilerplate(meta ProjectMetadata) error {
@@ -41,11 +46,60 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 	default:
 		GenerateGoBackend(basePath, meta)
 	}
+	
+	// ✅ FIXED: Calculate the exact dynamic backend language port BEFORE initializing the K8s struct
+	var backendPort int
+	switch meta.Backend {
+	case "Rust (Actix-web)":
+		backendPort = 8080
+	case "Node.js (Express)":
+		backendPort = 3000
+	case "Python (Django)":
+		backendPort = 8000
+	default: // Go (Golang)
+		backendPort = 8080
+	}
+
+	// ✅ FIXED: Clean mapping of dynamic struct variables with proper matching data types
+	backendK8sVars := k8s.K8sManifestVars{
+		ServiceName:   fmt.Sprintf("%s-backend", meta.ServiceName),
+		ImageName:     fmt.Sprintf("devspace/%s-backend", meta.ServiceName),
+		ContainerPort: backendPort,
+		ServicePort:   backendPort,
+		ServiceType:   meta.K8sServiceType, // Dynamically parsed string
+		Replicas:      meta.K8sReplicas,    // Dynamically parsed int
+		CpuRequest:    meta.K8sCpuRequest,  // Dynamically parsed string
+		MemoryRequest: meta.K8sMemRequest,  // Dynamically parsed string
+	}
+	_ = k8s.GenerateK8sManifestes(basePath, backendK8sVars)
 
 	// 3. Let the frontend CLI handle its own folder creation cleanly
 	if meta.Frontend != "None (Pure Backend API)" {
 		frontendPath := filepath.Join(basePath, "frontend")
 		GenerateFrontendFramework(frontendPath, "", meta)
+
+		// ✅ BONUS DYNAMIC FRONTEND K8S PIPELINE CONFIGURATION
+		var frontendPort int
+		switch meta.Frontend {
+		case "Next.js", "Next":
+			frontendPort = 3000
+		case "React":
+			frontendPort = 80 // Nginx distribution production engine standard
+		default:
+			frontendPort = 3000
+		}
+
+		frontendK8sVars := k8s.K8sManifestVars{
+			ServiceName:   fmt.Sprintf("%s-frontend", meta.ServiceName),
+			ImageName:     fmt.Sprintf("devspace/%s-frontend", meta.ServiceName),
+			ContainerPort: frontendPort,
+			ServicePort:   80,
+			ServiceType:   "LoadBalancer", // Frontends remain mapped to an edge router
+			Replicas:      meta.K8sReplicas,
+			CpuRequest:    "100m",
+			MemoryRequest: "128Mi",
+		}
+		_ = k8s.GenerateK8sManifestes(basePath, frontendK8sVars)
 	}
 
 	// 4. Generate custom full-stack Dockerfile on the fly at the ROOT level
@@ -149,6 +203,18 @@ COPY --from=backend-builder /app/backend/main .
 
 	targetPath := filepath.Join(basePath, "Dockerfile")
 	return os.WriteFile(targetPath, []byte(dockerfileContent), 0644)
+}
+
+// generate serviceworkspace into custom folder structures cleanly
+func GenerateServiceWorkspace(customPath string, meta ProjectMetadata) error {
+	if err := os.MkdirAll(customPath, 0755); err != nil {
+		return fmt.Errorf("failed to provision target directory root: %w", err)
+	}
+
+	fmt.Printf("📂 Initializing target workspace root at: %s\n", customPath)
+	meta.TargetDir = filepath.Dir(customPath)
+	meta.ServiceName = filepath.Base(customPath)
+	return GenerateBoilerplate(meta)
 }
 
 func writeTemplate(targetFilePath string, blueprint string, meta ProjectMetadata) error {

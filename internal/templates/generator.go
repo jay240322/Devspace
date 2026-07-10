@@ -40,7 +40,32 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 		GenerateRustBackend(basePath, meta)
 	default:
 		GenerateGoBackend(basePath, meta)
+	}	
+	// ✅ FIXED: Calculate the exact dynamic backend language port BEFORE initializing the K8s struct
+	var backendPort int
+	switch meta.Backend {
+	case "Rust (Actix-web)":
+		backendPort = 8080
+	case "Node.js (Express)":
+		backendPort = 3000
+	case "Python (Django)":
+		backendPort = 8000
+	default: // Go (Golang)
+		backendPort = 8080
 	}
+
+	// ✅ FIXED: Clean mapping of dynamic struct variables with proper matching data types
+	backendK8sVars := k8s.K8sManifestVars{
+		ServiceName:   fmt.Sprintf("%s-backend", meta.ServiceName),
+		ImageName:     fmt.Sprintf("%s/%s-backend", meta.GitHubUser, meta.ServiceName), // ✅ Keeping your dynamic update!
+		ContainerPort: backendPort,
+		ServicePort:   backendPort,
+		ServiceType:   meta.K8sServiceType, 
+		Replicas:      meta.K8sReplicas,    
+		CpuRequest:    meta.K8sCpuRequest,   
+		MemoryRequest: meta.K8sMemRequest,   
+	}
+	_ = k8s.GenerateK8sManifestes(basePath, backendK8sVars)
 
 	// 3. Let the frontend CLI handle its own folder creation cleanly
 	if meta.Frontend != "None (Pure Backend API)" {

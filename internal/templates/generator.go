@@ -17,7 +17,7 @@ type ProjectMetadata struct {
 	GitHubUser     string
 	K8sReplicas    int
 	K8sServiceType string
-	K8sCpuRequest  string // ✅ Fixed typo: added missing 'u'
+	K8sCpuRequest  string 
 	K8sMemRequest  string 
 }
 
@@ -45,8 +45,9 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 		GenerateRustBackend(basePath, meta)
 	default:
 		GenerateGoBackend(basePath, meta)
-	}	
-	// ✅ FIXED: Calculate the exact dynamic backend language port BEFORE initializing the K8s struct
+	}   
+
+	// ✅ CALCULATE BACKEND PORT (Only once!)
 	var backendPort int
 	switch meta.Backend {
 	case "Rust (Actix-web)":
@@ -59,36 +60,10 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 		backendPort = 8080
 	}
 	
-	// ✅ FIXED: Calculate the exact dynamic backend language port BEFORE initializing the K8s struct
-	var backendPort int
-	switch meta.Backend {
-	case "Rust (Actix-web)":
-		backendPort = 8080
-	case "Node.js (Express)":
-		backendPort = 3000
-	case "Python (Django)":
-		backendPort = 8000
-	default: // Go (Golang)
-		backendPort = 8080
-	}
-
-	// ✅ FIXED: Clean mapping of dynamic struct variables with proper matching data types
+	// ✅ DYNAMIC KUBERNETES MANIFEST MAPPING (Using your GitHub User update!)
 	backendK8sVars := k8s.K8sManifestVars{
 		ServiceName:   fmt.Sprintf("%s-backend", meta.ServiceName),
-		ImageName:     fmt.Sprintf("devspace/%s-backend", meta.ServiceName),
-		ContainerPort: backendPort,
-		ServicePort:   backendPort,
-		ServiceType:   meta.K8sServiceType, // Dynamically parsed string
-		Replicas:      meta.K8sReplicas,    // Dynamically parsed int
-		CpuRequest:    meta.K8sCpuRequest,  // Dynamically parsed string
-		MemoryRequest: meta.K8sMemRequest,  // Dynamically parsed string
-	}
-	_ = k8s.GenerateK8sManifestes(basePath, backendK8sVars)
-
-	// ✅ FIXED: Clean mapping of dynamic struct variables with proper matching data types
-	backendK8sVars := k8s.K8sManifestVars{
-		ServiceName:   fmt.Sprintf("%s-backend", meta.ServiceName),
-		ImageName:     fmt.Sprintf("%s/%s-backend", meta.GitHubUser, meta.ServiceName), // ✅ Keeping your dynamic update!
+		ImageName:     fmt.Sprintf("%s/%s-backend", meta.GitHubUser, meta.ServiceName), 
 		ContainerPort: backendPort,
 		ServicePort:   backendPort,
 		ServiceType:   meta.K8sServiceType, 
@@ -103,7 +78,7 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 		frontendPath := filepath.Join(basePath, "frontend")
 		GenerateFrontendFramework(frontendPath, "", meta)
 
-		// ✅ BONUS DYNAMIC FRONTEND K8S PIPELINE CONFIGURATION
+		// BONUS DYNAMIC FRONTEND K8S PIPELINE CONFIGURATION
 		var frontendPort int
 		switch meta.Frontend {
 		case "Next.js", "Next":
@@ -116,10 +91,10 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 
 		frontendK8sVars := k8s.K8sManifestVars{
 			ServiceName:   fmt.Sprintf("%s-frontend", meta.ServiceName),
-			ImageName:     fmt.Sprintf("devspace/%s-frontend", meta.ServiceName),
+			ImageName:     fmt.Sprintf("%s/%s-frontend", meta.GitHubUser, meta.ServiceName),
 			ContainerPort: frontendPort,
 			ServicePort:   80,
-			ServiceType:   "LoadBalancer", // Frontends remain mapped to an edge router
+			ServiceType:   "LoadBalancer", 
 			Replicas:      meta.K8sReplicas,
 			CpuRequest:    "100m",
 			MemoryRequest: "128Mi",

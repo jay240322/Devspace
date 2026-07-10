@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // K8sManifestVars represents the options passed from the CLI/orchestrator
@@ -25,17 +26,32 @@ func GenerateK8sManifestes(targetDir string, vars K8sManifestVars) error {
 		return fmt.Errorf("failed to create k8s directory: %w", err)
 	}
 
-	// Calculate production limits automatically based on user-defined requests
+	// Dynamic safe fallbacks for resource parameters if empty
+	cpuReq := vars.CpuRequest
+	if cpuReq == "" { cpuReq = "250m" }
+	
+	memReq := vars.MemoryRequest
+	if memReq == "" { memReq = "256Mi" }
+
+	// Calculate production limits cleanly based on units
 	cpuLimit := "1"
-	if vars.CpuRequest == "500m" || vars.CpuRequest == "1" {
+	if strings.Contains(cpuReq, "500m") || cpuReq == "1" {
 		cpuLimit = "2"
+	} else if cpuReq == "250m" {
+		cpuLimit = "500m" // Safely double the 250m request out to 500m limit
 	}
+
 	memLimit := "512Mi"
-	if vars.MemoryRequest == "512Mi" || vars.MemoryRequest == "1Gi" {
+	if strings.Contains(memReq, "512Mi") {
+		memLimit = "1Gi"
+	} else if strings.Contains(memReq, "1Gi") || strings.Contains(memReq, "1024Mi") {
 		memLimit = "2Gi"
+	} else if memReq == "256Mi" {
+		memLimit = "512Mi"
 	}
 
 	// 1. Dynamic Deployment Blueprint Configuration
+	// NOTE: Removed structural double quotes around resource inputs to avoid string escaping formatting bugs
 	deploymentContent := fmt.Sprintf(`apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -59,7 +75,7 @@ spec:
     spec:
       containers:
       - name: %s
-        image: %s:latest
+        image: %s
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: %d
@@ -77,14 +93,14 @@ spec:
           periodSeconds: 20
         resources:
           requests:
-            cpu: "%s"
-            memory: "%s"
+            cpu: %s
+            memory: %s
           limits:
-            cpu: "%s"
-            memory: "%s"
+            cpu: %s
+            memory: %s
 `, vars.ServiceName, vars.ServiceName, vars.Replicas, vars.ServiceName, vars.ServiceName,
 		vars.ServiceName, vars.ImageName, vars.ContainerPort, vars.ContainerPort, vars.ContainerPort,
-		vars.CpuRequest, vars.MemoryRequest, cpuLimit, memLimit)
+		cpuReq, memReq, cpuLimit, memLimit)
 
 	deployFile := filepath.Join(k8sOutDir, fmt.Sprintf("%s-deployment.yaml", vars.ServiceName))
 	if err := os.WriteFile(deployFile, []byte(deploymentContent), 0644); err != nil {
@@ -113,6 +129,6 @@ spec:
 		return fmt.Errorf("failed to write service file: %w", err)
 	}
 
-	fmt.Printf("Kubernetes manifeste generated successfully for %s in /k8s\n", vars.ServiceName)
+	fmt.Printf("Kubernetes manifests generated successfully for %s in /k8s\n", vars.ServiceName)
 	return nil
 }

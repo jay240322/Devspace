@@ -1,10 +1,12 @@
 package k8s
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
 )
 
 // K8sManifestVars represents the options passed from the CLI/orchestrator
@@ -17,6 +19,9 @@ type K8sManifestVars struct {
 	Replicas      int
 	CpuRequest    string
 	MemoryRequest string
+	CpuLimit      string
+	MemoryLimit   string
+	HealthPath    string
 }
 
 // GenerateK8sManifestes writes out deployment and service configuration blocks dynamically
@@ -27,39 +32,57 @@ func GenerateK8sManifestes(targetDir string, vars K8sManifestVars) error {
 	}
 
 	// Dynamic safe fallbacks for resource parameters if empty
-	cpuReq := vars.CpuRequest
-	if cpuReq == "" { cpuReq = "250m" }
-	
-	memReq := vars.MemoryRequest
-	if memReq == "" { memReq = "256Mi" }
+	if vars.CpuRequest == "" {
+		vars.CpuRequest = "250m"
+	}
+	if vars.MemoryRequest == "" {
+		vars.MemoryRequest = "256Mi"
+	}
 
 	// Calculate production limits cleanly based on units
-	cpuLimit := "1"
-	if strings.Contains(cpuReq, "500m") || cpuReq == "1" {
-		cpuLimit = "2"
-	} else if cpuReq == "250m" {
-		cpuLimit = "500m" // Safely double the 250m request out to 500m limit
+	if vars.CpuLimit == "" {
+		cpuLimit := "1"
+		if strings.Contains(vars.CpuRequest, "500m") || vars.CpuRequest == "1" {
+			cpuLimit = "2"
+		} else if vars.CpuRequest == "250m" {
+			cpuLimit = "500m"
+		}
+		vars.CpuLimit = cpuLimit
 	}
 
-	memLimit := "512Mi"
-	if strings.Contains(memReq, "512Mi") {
-		memLimit = "1Gi"
-	} else if strings.Contains(memReq, "1Gi") || strings.Contains(memReq, "1024Mi") {
-		memLimit = "2Gi"
-	} else if memReq == "256Mi" {
-		memLimit = "512Mi"
+	if vars.MemoryLimit == "" {
+		memLimit := "512Mi"
+		if strings.Contains(vars.MemoryRequest, "512Mi") {
+			memLimit = "1Gi"
+		} else if strings.Contains(vars.MemoryRequest, "1Gi") || strings.Contains(vars.MemoryRequest, "1024Mi") {
+			memLimit = "2Gi"
+		} else if vars.MemoryRequest == "256Mi" {
+			memLimit = "512Mi"
+		}
+		vars.MemoryLimit = memLimit
 	}
 
-	// 1. Dynamic Deployment Blueprint Configuration
-	// NOTE: Removed structural double quotes around resource inputs to avoid string escaping formatting bugs
-	deploymentContent := fmt.Sprintf(`apiVersion: apps/v1
+	if vars.Replicas <= 0 {
+		vars.Replicas = 1
+	}
+
+	if vars.HealthPath == "" {
+		vars.HealthPath = "/api/health"
+	}
+
+	if vars.ServiceType == "" {
+		vars.ServiceType = "ClusterIP"
+	}
+
+	// 1. Dynamic Deployment Blueprint Configuration using text/template
+	deploymentTemplateStr := `apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: %s-deployment
+  name: {{.ServiceName}}-deployment
   labels:
-    app: %s
+    app: {{.ServiceName}}
 spec:
-  replicas: %d
+  replicas: {{.Replicas}}
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -67,65 +90,83 @@ spec:
       maxUnavailable: 0
   selector:
     matchLabels:
-      app: %s
+      app: {{.ServiceName}}
   template:
     metadata:
       labels:
-        app: %s
+        app: {{.ServiceName}}
     spec:
       containers:
-      - name: %s
-        image: %s
+      - name: {{.ServiceName}}
+        image: {{.ImageName}}
         imagePullPolicy: IfNotPresent
         ports:
-        - containerPort: %d
+        - containerPort: {{.ContainerPort}}
         readinessProbe:
           httpGet:
-            path: /api/health
-            port: %d
+            path: {{.HealthPath}}
+            port: {{.ContainerPort}}
           initialDelaySeconds: 5
           periodSeconds: 10
         livenessProbe:
           httpGet:
-            path: /api/health
-            port: %d
+            path: {{.HealthPath}}
+            port: {{.ContainerPort}}
           initialDelaySeconds: 15
           periodSeconds: 20
         resources:
           requests:
-            cpu: %s
-            memory: %s
+            cpu: {{.CpuRequest}}
+            memory: {{.MemoryRequest}}
           limits:
-            cpu: %s
-            memory: %s
-`, vars.ServiceName, vars.ServiceName, vars.Replicas, vars.ServiceName, vars.ServiceName,
-		vars.ServiceName, vars.ImageName, vars.ContainerPort, vars.ContainerPort, vars.ContainerPort,
-		cpuReq, memReq, cpuLimit, memLimit)
+            cpu: {{.CpuLimit}}
+            memory: {{.MemoryLimit}}
+`
+
+	tmplDeploy, err := template.New("deployment").Parse(deploymentTemplateStr)
+	if err != nil {
+		return fmt.Errorf("failed to parse deployment template: %w", err)
+	}
+
+	var deployBuf bytes.Buffer
+	if err := tmplDeploy.Execute(&deployBuf, vars); err != nil {
+		return fmt.Errorf("failed to execute deployment template: %w", err)
+	}
 
 	deployFile := filepath.Join(k8sOutDir, fmt.Sprintf("%s-deployment.yaml", vars.ServiceName))
-	if err := os.WriteFile(deployFile, []byte(deploymentContent), 0644); err != nil {
+	if err := os.WriteFile(deployFile, deployBuf.Bytes(), 0644); err != nil {
 		return fmt.Errorf("failed to write deployment file: %w", err)
 	}
 
-	// 2. Dynamic Service Blueprint Configuration
-	serviceContent := fmt.Sprintf(`apiVersion: v1
+	// 2. Dynamic Service Blueprint Configuration using text/template
+	serviceTemplateStr := `apiVersion: v1
 kind: Service
 metadata:
-  name: %s-service
+  name: {{.ServiceName}}-service
   labels:
-    app: %s
+    app: {{.ServiceName}}
 spec:
-  type: %s
+  type: {{.ServiceType}}
   ports:
-  - port: %d
-    targetPort: %d
+  - port: {{.ServicePort}}
+    targetPort: {{.ContainerPort}}
     protocol: TCP
   selector:
-    app: %s
-`, vars.ServiceName, vars.ServiceName, vars.ServiceType, vars.ServicePort, vars.ContainerPort, vars.ServiceName)
+    app: {{.ServiceName}}
+`
+
+	tmplService, err := template.New("service").Parse(serviceTemplateStr)
+	if err != nil {
+		return fmt.Errorf("failed to parse service template: %w", err)
+	}
+
+	var serviceBuf bytes.Buffer
+	if err := tmplService.Execute(&serviceBuf, vars); err != nil {
+		return fmt.Errorf("failed to execute service template: %w", err)
+	}
 
 	serviceFile := filepath.Join(k8sOutDir, fmt.Sprintf("%s-service.yaml", vars.ServiceName))
-	if err := os.WriteFile(serviceFile, []byte(serviceContent), 0644); err != nil {
+	if err := os.WriteFile(serviceFile, serviceBuf.Bytes(), 0644); err != nil {
 		return fmt.Errorf("failed to write service file: %w", err)
 	}
 

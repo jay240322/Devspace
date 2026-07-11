@@ -5,20 +5,26 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/template"
 	"devspace/internal/templates/k8s"
 )
 
 type ProjectMetadata struct {
-	TargetDir      string
-	ServiceName    string
-	Backend        string
-	Frontend       string
-	GitHubUser     string
-	K8sReplicas    int
-	K8sServiceType string
-	K8sCpuRequest  string 
-	K8sMemRequest  string 
+	TargetDir           string
+	ServiceName         string
+	Backend             string
+	Frontend            string
+	GitHubUser          string
+	K8sReplicas         int
+	K8sServiceType      string
+	K8sCpuRequest       string 
+	K8sMemRequest       string 
+	BackendPort         int
+	BackendHealthPath   string
+	FrontendPort        int
+	FrontendServicePort int
+	FrontendHealthPath  string
 }
 
 func GenerateBoilerplate(meta ProjectMetadata) error {
@@ -47,29 +53,40 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 		GenerateGoBackend(basePath, meta)
 	}   
 
-	// ✅ CALCULATE BACKEND PORT (Only once!)
-	var backendPort int
-	switch meta.Backend {
-	case "Rust (Actix-web)":
-		backendPort = 8080
-	case "Node.js (Express)":
-		backendPort = 3000
-	case "Python (Django)":
-		backendPort = 8000
-	default: // Go (Golang)
-		backendPort = 8080
+	// Fallback/defaults in GenerateBoilerplate in case meta wasn't initialized via CLI
+	if meta.BackendPort == 0 {
+		switch meta.Backend {
+		case "Node.js (Express)":
+			meta.BackendPort = 8080
+		case "Rust (Actix-web)":
+			meta.BackendPort = 8080
+		case "Python (Django)":
+			meta.BackendPort = 8080
+		default: // Go (Golang)
+			meta.BackendPort = 8080
+		}
 	}
-	
-	// ✅ DYNAMIC KUBERNETES MANIFEST MAPPING (Using your GitHub User update!)
+	if meta.BackendHealthPath == "" {
+		meta.BackendHealthPath = "/api/health"
+	}
+	if meta.K8sServiceType == "" {
+		meta.K8sServiceType = "ClusterIP"
+	}
+	if meta.K8sReplicas <= 0 {
+		meta.K8sReplicas = 1
+	}
+
+	// ✅ DYNAMIC KUBERNETES MANIFEST MAPPING
 	backendK8sVars := k8s.K8sManifestVars{
 		ServiceName:   fmt.Sprintf("%s-backend", meta.ServiceName),
 		ImageName:     fmt.Sprintf("%s/%s-backend", meta.GitHubUser, meta.ServiceName), 
-		ContainerPort: backendPort,
-		ServicePort:   backendPort,
+		ContainerPort: meta.BackendPort,
+		ServicePort:   meta.BackendPort,
 		ServiceType:   meta.K8sServiceType, 
 		Replicas:      meta.K8sReplicas,    
 		CpuRequest:    meta.K8sCpuRequest,   
-		MemoryRequest: meta.K8sMemRequest,   
+		MemoryRequest: meta.K8sMemRequest,
+		HealthPath:    meta.BackendHealthPath,
 	}
 	_ = k8s.GenerateK8sManifestes(basePath, backendK8sVars)
 
@@ -78,26 +95,34 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 		frontendPath := filepath.Join(basePath, "frontend")
 		GenerateFrontendFramework(frontendPath, "", meta)
 
-		// BONUS DYNAMIC FRONTEND K8S PIPELINE CONFIGURATION
-		var frontendPort int
-		switch meta.Frontend {
-		case "Next.js", "Next":
-			frontendPort = 3000
-		case "React":
-			frontendPort = 80 // Nginx distribution production engine standard
-		default:
-			frontendPort = 3000
+		if meta.FrontendPort == 0 {
+			if strings.Contains(meta.Frontend, "Next.js") {
+				meta.FrontendPort = 3000
+			} else {
+				meta.FrontendPort = 80
+			}
+		}
+		if meta.FrontendServicePort == 0 {
+			if strings.Contains(meta.Frontend, "Next.js") {
+				meta.FrontendServicePort = 3000
+			} else {
+				meta.FrontendServicePort = 80
+			}
+		}
+		if meta.FrontendHealthPath == "" {
+			meta.FrontendHealthPath = "/"
 		}
 
 		frontendK8sVars := k8s.K8sManifestVars{
 			ServiceName:   fmt.Sprintf("%s-frontend", meta.ServiceName),
 			ImageName:     fmt.Sprintf("%s/%s-frontend", meta.GitHubUser, meta.ServiceName),
-			ContainerPort: frontendPort,
-			ServicePort:   80,
+			ContainerPort: meta.FrontendPort,
+			ServicePort:   meta.FrontendServicePort,
 			ServiceType:   "LoadBalancer", 
 			Replicas:      meta.K8sReplicas,
 			CpuRequest:    "100m",
 			MemoryRequest: "128Mi",
+			HealthPath:    meta.FrontendHealthPath,
 		}
 		_ = k8s.GenerateK8sManifestes(basePath, frontendK8sVars)
 	}
@@ -114,95 +139,82 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 
 // Dynamic Dockerfile Builder Factory
 func generateDynamicDockerfile(basePath string, meta ProjectMetadata) error {
-	var dockerfileContent string
-
+	// 1. Generate FRONTEND Dockerfile (If frontend exists)
 	if meta.Frontend != "None (Pure Backend API)" {
-		dockerfileContent += fmt.Sprintf(`# --- Stage 1: Dynamic Frontend Builder Layer (%s) ---
-FROM node:20-alpine AS frontend-builder
-WORKDIR /app/frontend
+		frontendContent := fmt.Sprintf(`# --- Frontend Production Nginx Stack ---
+FROM node:20-alpine AS builder
+WORKDIR /app
 COPY frontend/package*.json ./
 RUN npm install
 COPY frontend/ ./
 RUN npm run build --if-present
 
-`, meta.Frontend)
+FROM nginx:alpine
+COPY --from=builder /app/dist /usr/share/nginx/html
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
+`)
+		
+		frontPath := filepath.Join(basePath, "frontend.Dockerfile")
+		if err := os.WriteFile(frontPath, []byte(frontendContent), 0644); err != nil {
+			return err
+		}
 	}
 
+	// 2. Generate BACKEND Dockerfile
+	var backendContent string
 	switch meta.Backend {
 	case "Python (Django)":
-		dockerfileContent += `# --- Stage 2: Python Django Production Environment ---
+		backendContent = `# --- Python Django Environment ---
 FROM python:3.11-slim
 WORKDIR /app
 RUN pip install django django-cors-headers
 COPY backend/ ./backend/
+EXPOSE 8080
+CMD ["python", "backend/manage.py", "runserver", "0.0.0.0:8080"]
 `
-		if meta.Frontend != "None (Pure Backend API)" {
-			dockerfileContent += "COPY --from=frontend-builder /app/frontend/dist ./frontend/dist\n"
-		}
-		dockerfileContent += "EXPOSE 8080\nCMD [\"python\", \"backend/manage.py\", \"runserver\", \"0.0.0.0:8080\"]"
-
 	case "Node.js (Express)":
-		dockerfileContent += `# --- Stage 2: Nodejs Express Production Runtime ---
+		backendContent = `# --- Node.js Express Runtime ---
 FROM node:20-alpine
 WORKDIR /app
 COPY backend/package*.json ./backend/
 RUN cd backend && npm install
 COPY backend/ ./backend/
+EXPOSE 8080
+CMD ["node", "backend/index.js"]
 `
-		if meta.Frontend != "None (Pure Backend API)" {
-			dockerfileContent += "COPY --from=frontend-builder /app/frontend/dist ./backend/public\n"
-		}
-		dockerfileContent += "EXPOSE 8080\nCMD [\"node\", \"backend/index.js\"]"
-
 	case "Rust (Actix-web)":
-		dockerfileContent += `# --- Stage 2: Rust Actix Compiled Binary Stage ---
-FROM rust:1.75 as backend-builder
+		backendContent = `# --- Rust Actix Pipeline ---
+FROM rust:1.75 as builder
 WORKDIR /app
 COPY backend/ ./backend/
 WORKDIR /app/backend
 RUN cargo build --release
 
-# --- Stage 3: Minimal Linux Execution Core ---
 FROM debian:bookworm-slim
 WORKDIR /root/
-COPY --from=backend-builder /app/backend/target/release/backend ./main
+COPY --from=builder /app/backend/target/release/backend ./main
+EXPOSE 8080
+CMD ["./main"]
 `
-		if meta.Frontend != "None (Pure Backend API)" {
-			dockerfileContent += "COPY --from=frontend-builder /app/frontend/dist ./public\n"
-		}
-		dockerfileContent += "EXPOSE 8080\nCMD [\"./main\"]"
-
 	default: // Go (Golang)
-		dockerfileContent += `# --- Stage 2: Go Binary Builder Stage ---
-FROM golang:1.22-alpine AS backend-builder
+		backendContent = `# --- Go Deployment Core ---
+FROM golang:1.22-alpine AS builder
 WORKDIR /app
 COPY backend/ ./backend/
 WORKDIR /app/backend
 RUN go build -o main .
 
-# --- Stage 3: Lightweight Alpine Deployment Core ---
 FROM alpine:latest
 WORKDIR /root/
-COPY --from=backend-builder /app/backend/main .
+COPY --from=builder /app/backend/main .
+EXPOSE 8080
+CMD ["./main"]
 `
-		if meta.Frontend != "None (Pure Backend API)" {
-			dockerfileContent += "COPY --from=frontend-builder /app/frontend/dist ./public\n"
-		}
-		dockerfileContent += "EXPOSE 8080\nCMD [\"./main\"]"
 	}
 
-	// Add dynamic footer signature using text/template parsing
-	footerBlueprint := "\n\n# Provisioned securely via DevSpace for github.com/{{.GitHubUser}}/{{.ServiceName}}"
-	tmpl, err := template.New("footer").Parse(footerBlueprint)
-	if err == nil {
-		var processedFooter bytes.Buffer
-		if err := tmpl.Execute(&processedFooter, meta); err == nil {
-			dockerfileContent += processedFooter.String()
-		}
-	}
-
-	targetPath := filepath.Join(basePath, "Dockerfile")
-	return os.WriteFile(targetPath, []byte(dockerfileContent), 0644)
+	backPath := filepath.Join(basePath, "backend.Dockerfile")
+	return os.WriteFile(backPath, []byte(backendContent), 0644)
 }
 
 // generate serviceworkspace into custom folder structures cleanly

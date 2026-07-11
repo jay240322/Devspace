@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/manifoldco/promptui"
 	"github.com/spf13/cobra"
@@ -102,12 +103,49 @@ var createCmd = &cobra.Command{
 		fmt.Println("Backend : %s\n", backend)
 		fmt.Println("Frontend : %s\n", frontend)
 
+		// Determine backend port and health path based on backend tier
+		var backendPort int
+		switch backend {
+		case "Node.js (Express)":
+			backendPort = 8080
+		case "Rust (Actix-web)":
+			backendPort = 8080
+		case "Python (Django)":
+			backendPort = 8080
+		default: // Go (Golang)
+			backendPort = 8080
+		}
+
+		backendHealthPath := "/api/health"
+
+		// Determine frontend port, service port, and health path based on frontend tier
+		var frontendPort int
+		var frontendServicePort int
+		var frontendHealthPath string
+
+		if frontend != "None (Pure Backend API)" {
+			if strings.Contains(frontend, "Next.js") {
+				frontendPort = 3000
+				frontendServicePort = 3000
+				frontendHealthPath = "/"
+			} else {
+				frontendPort = 80
+				frontendServicePort = 80
+				frontendHealthPath = "/"
+			}
+		}
+
 		meta := templates.ProjectMetadata{
-			TargetDir : targetDir,
-			ServiceName : serviceName,
-			Backend : backend,
-			Frontend : frontend,
-			GitHubUser :"patel-jay",
+			TargetDir:           targetDir,
+			ServiceName:         serviceName,
+			Backend:             backend,
+			Frontend:            frontend,
+			GitHubUser:          "patel-jay",
+			BackendPort:         backendPort,
+			BackendHealthPath:   backendHealthPath,
+			FrontendPort:        frontendPort,
+			FrontendServicePort: frontendServicePort,
+			FrontendHealthPath:  frontendHealthPath,
 		}
 
 		err = templates.GenerateBoilerplate(meta)

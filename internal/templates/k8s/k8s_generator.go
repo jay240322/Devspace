@@ -1,49 +1,34 @@
 package k8s
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
+	"text/template"
 )
 
-// K8sManifestVars represents the options passed from the CLI/orchestrator
 type K8sManifestVars struct {
 	ServiceName   string
 	ImageName     string
 	ContainerPort int
-	ServicePort   int 
+	ServicePort   int
 	ServiceType   string
 	Replicas      int
 	CpuRequest    string
 	MemoryRequest string
+	HealthPath    string
 }
 
-// GenerateK8sManifestes writes out deployment and service configuration blocks dynamically
-func GenerateK8sManifestes(targetDir string, vars K8sManifestVars) error {
-	k8sOutDir := filepath.Join(targetDir, "k8s")
-	if err := os.MkdirAll(k8sOutDir, 0755); err != nil {
-		return fmt.Errorf("failed to create k8s directory: %w", err)
-	}
-
-	// Calculate production limits automatically based on user-defined requests
-	cpuLimit := "1"
-	if vars.CpuRequest == "500m" || vars.CpuRequest == "1" {
-		cpuLimit = "2"
-	}
-	memLimit := "512Mi"
-	if vars.MemoryRequest == "512Mi" || vars.MemoryRequest == "1Gi" {
-		memLimit = "2Gi"
-	}
-
-	// 1. Dynamic Deployment Blueprint Configuration
-	deploymentContent := fmt.Sprintf(`apiVersion: apps/v1
+// Global Deployment Blueprint Template String
+const deploymentBlueprint = `apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: %s-deployment
+  name: {{.ServiceName}}-deployment
   labels:
-    app: %s
+    app: {{.ServiceName}}
 spec:
-  replicas: %d
+  replicas: {{.Replicas}}
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -51,68 +36,93 @@ spec:
       maxUnavailable: 0
   selector:
     matchLabels:
-      app: %s
+      app: {{.ServiceName}}
   template:
     metadata:
       labels:
-        app: %s
+        app: {{.ServiceName}}
     spec:
       containers:
-      - name: %s
-        image: %s:latest
+      - name: {{.ServiceName}}
+        image: {{.ImageName}}:latest
         imagePullPolicy: IfNotPresent
         ports:
-        - containerPort: %d
+        - containerPort: {{.ContainerPort}}
         readinessProbe:
           httpGet:
-            path: /api/health
-            port: %d
+            path: {{.HealthPath}}
+            port: {{.ContainerPort}}
           initialDelaySeconds: 5
           periodSeconds: 10
         livenessProbe:
           httpGet:
-            path: /api/health
-            port: %d
+            path: {{.HealthPath}}
+            port: {{.ContainerPort}}
           initialDelaySeconds: 15
           periodSeconds: 20
         resources:
           requests:
-            cpu: "%s"
-            memory: "%s"
+            cpu: "{{.CpuRequest}}"
+            memory: "{{.MemoryRequest}}"
           limits:
-            cpu: "%s"
-            memory: "%s"
-`, vars.ServiceName, vars.ServiceName, vars.Replicas, vars.ServiceName, vars.ServiceName,
-		vars.ServiceName, vars.ImageName, vars.ContainerPort, vars.ContainerPort, vars.ContainerPort,
-		vars.CpuRequest, vars.MemoryRequest, cpuLimit, memLimit)
+            cpu: "500m"
+            memory: "512Mi"
+`
 
-	deployFile := filepath.Join(k8sOutDir, fmt.Sprintf("%s-deployment.yaml", vars.ServiceName))
-	if err := os.WriteFile(deployFile, []byte(deploymentContent), 0644); err != nil {
-		return fmt.Errorf("failed to write deployment file: %w", err)
-	}
-
-	// 2. Dynamic Service Blueprint Configuration
-	serviceContent := fmt.Sprintf(`apiVersion: v1
+// Global Service Blueprint Template String
+const serviceBlueprint = `apiVersion: v1
 kind: Service
 metadata:
-  name: %s-service
+  name: {{.ServiceName}}-service
   labels:
-    app: %s
+    app: {{.ServiceName}}
 spec:
-  type: %s
+  type: {{.ServiceType}}
   ports:
-  - port: %d
-    targetPort: %d
+  - port: {{.ServicePort}}
+    targetPort: {{.ContainerPort}}
     protocol: TCP
   selector:
-    app: %s
-`, vars.ServiceName, vars.ServiceName, vars.ServiceType, vars.ServicePort, vars.ContainerPort, vars.ServiceName)
+    app: {{.ServiceName}}
+`
 
-	serviceFile := filepath.Join(k8sOutDir, fmt.Sprintf("%s-service.yaml", vars.ServiceName))
-	if err := os.WriteFile(serviceFile, []byte(serviceContent), 0644); err != nil {
-		return fmt.Errorf("failed to write service file: %w", err)
+func GenerateK8sManifestes(basePath string, vars K8sManifestVars) error {
+	k8sDir := filepath.Join(basePath, "k8s")
+	if err := os.MkdirAll(k8sDir, 0755); err != nil {
+		return fmt.Errorf("failed to create k8s directory: %w", err)
 	}
 
-	fmt.Printf("Kubernetes manifeste generated successfully for %s in /k8s\n", vars.ServiceName)
+	// 1. Process and write the Deployment manifest file
+	tmplDep, err := template.New("deployment").Parse(deploymentBlueprint)
+	if err != nil {
+		return fmt.Errorf("failed to parse deployment blueprint template: %w", err)
+	}
+	
+	var depBuffer bytes.Buffer
+	if err := tmplDep.Execute(&depBuffer, vars); err != nil {
+		return fmt.Errorf("failed to execute deployment template mapping: %w", err)
+	}
+
+	depPath := filepath.Join(k8sDir, fmt.Sprintf("%s-deployment.yaml", vars.ServiceName))
+	if err := os.WriteFile(depPath, depBuffer.Bytes(), 0644); err != nil {
+		return fmt.Errorf("failed to write deployment manifest: %w", err)
+	}
+
+	// 2. Process and write the Service manifest file
+	tmplSvc, err := template.New("service").Parse(serviceBlueprint)
+	if err != nil {
+		return fmt.Errorf("failed to parse service blueprint template: %w", err)
+	}
+
+	var svcBuffer bytes.Buffer
+	if err := tmplSvc.Execute(&svcBuffer, vars); err != nil {
+		return fmt.Errorf("failed to execute service template mapping: %w", err)
+	}
+
+	svcPath := filepath.Join(k8sDir, fmt.Sprintf("%s-service.yaml", vars.ServiceName))
+	if err := os.WriteFile(svcPath, svcBuffer.Bytes(), 0644); err != nil {
+		return fmt.Errorf("failed to write service manifest: %w", err)
+	}
+
 	return nil
 }

@@ -28,12 +28,10 @@ type ProjectMetadata struct {
 }
 
 func GenerateBoilerplate(meta ProjectMetadata) error {
-	// If TargetDir is empty, default to current directory safely
 	if meta.TargetDir == "" {
 		meta.TargetDir = "."
 	}
 
-	// This cleanly joins your custom target path and service folder name
 	basePath := filepath.Join(meta.TargetDir, meta.ServiceName)
 
 	// 1. Physically construct the root service directory
@@ -53,7 +51,6 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 		GenerateGoBackend(basePath, meta)
 	}   
 
-	// Fallback/defaults in GenerateBoilerplate in case meta wasn't initialized via CLI
 	if meta.BackendPort == 0 {
 		switch meta.Backend {
 		case "Node.js (Express)":
@@ -61,7 +58,7 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 		case "Rust (Actix-web)":
 			meta.BackendPort = 8080
 		case "Python (Django)":
-			meta.BackendPort = 8080
+			meta.BackendPort = 8000
 		default: // Go (Golang)
 			meta.BackendPort = 8080
 		}
@@ -76,7 +73,7 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 		meta.K8sReplicas = 1
 	}
 
-	// ✅ DYNAMIC KUBERNETES MANIFEST MAPPING
+	// ✅ DYNAMIC KUBERNETES MANIFEST MAPPING (BACKEND)
 	backendK8sVars := k8s.K8sManifestVars{
 		ServiceName:   fmt.Sprintf("%s-backend", meta.ServiceName),
 		ImageName:     fmt.Sprintf("%s/%s-backend", meta.GitHubUser, meta.ServiceName), 
@@ -113,6 +110,7 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 			meta.FrontendHealthPath = "/"
 		}
 
+		// ✅ DYNAMIC KUBERNETES MANIFEST MAPPING (FRONTEND)
 		frontendK8sVars := k8s.K8sManifestVars{
 			ServiceName:   fmt.Sprintf("%s-frontend", meta.ServiceName),
 			ImageName:     fmt.Sprintf("%s/%s-frontend", meta.GitHubUser, meta.ServiceName),
@@ -127,55 +125,68 @@ func GenerateBoilerplate(meta ProjectMetadata) error {
 		_ = k8s.GenerateK8sManifestes(basePath, frontendK8sVars)
 	}
 
-	// 4. Generate custom full-stack Dockerfile on the fly at the ROOT level
+	// 4. Generate ONE unified multi-stage Dockerfile at the root directory level
 	err := generateDynamicDockerfile(basePath, meta)
 	if err != nil {
 		fmt.Printf("⚠️  Dockerfile compilation skipped: %v\n", err)
 	}
 
+	// 5. Generate a root .dockerignore file to bypass heavy node installation contexts
+	ignoreContent := `node_modules
+.git
+frontend/node_modules
+backend/venv
+*.exe
+.idea
+.vscode
+`
+	ignorePath := filepath.Join(basePath, ".dockerignore")
+	_ = os.WriteFile(ignorePath, []byte(ignoreContent), 0644)
+
 	fmt.Printf("\n✨ Successfully populated dynamic structure inside: %s\n", basePath)
 	return nil
 }
 
-// Dynamic Dockerfile Builder Factory
+// Unified Multi-Stage Dockerfile Builder Factory
 func generateDynamicDockerfile(basePath string, meta ProjectMetadata) error {
-	// 1. Generate FRONTEND Dockerfile (If frontend exists)
+	var dockerfileContent string
+
+	// A. Inject FRONTEND Stages if a user layout option is provided
 	if meta.Frontend != "None (Pure Backend API)" {
-		frontendContent := fmt.Sprintf(`# --- Frontend Production Nginx Stack ---
-FROM node:20-alpine AS builder
+		dockerfileContent += `# --- Stage 1: Frontend Dependency & Build Pipeline ---
+FROM node:20-alpine AS frontend-builder
+ENV NODE_ENV=production
+ENV NODE_OPTIONS="--max-old-space-size=2048"
 WORKDIR /app
 COPY frontend/package*.json ./
-RUN npm install
+RUN npm ci --only=production --quiet --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build --if-present
 
-FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
+# --- Stage 2: Frontend Production Web Server Runtime Target ---
+FROM nginx:alpine AS frontend-runtime
+COPY --from=frontend-builder /app/dist /usr/share/nginx/html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
-`)
-		
-		frontPath := filepath.Join(basePath, "frontend.Dockerfile")
-		if err := os.WriteFile(frontPath, []byte(frontendContent), 0644); err != nil {
-			return err
-		}
+
+`
 	}
 
-	// 2. Generate BACKEND Dockerfile
-	var backendContent string
+	// B. Append BACKEND Runtime Stages dynamically at the bottom
 	switch meta.Backend {
 	case "Python (Django)":
-		backendContent = `# --- Python Django Environment ---
-FROM python:3.11-slim
+		dockerfileContent += fmt.Sprintf(`# --- Stage 3: Python Django Backend Engine ---
+FROM python:3.11-slim AS backend-runtime
 WORKDIR /app
 RUN pip install django django-cors-headers
 COPY backend/ ./backend/
-EXPOSE 8080
-CMD ["python", "backend/manage.py", "runserver", "0.0.0.0:8080"]
-`
+EXPOSE %d
+CMD ["python", "backend/manage.py", "runserver", "0.0.0.0:%d"]
+`, meta.BackendPort, meta.BackendPort)
+
 	case "Node.js (Express)":
-		backendContent = `# --- Node.js Express Runtime ---
-FROM node:20-alpine
+		dockerfileContent += `# --- Stage 3: Node.js Express Backend Engine ---
+FROM node:20-alpine AS backend-runtime
 WORKDIR /app
 COPY backend/package*.json ./backend/
 RUN cd backend && npm install
@@ -184,40 +195,41 @@ EXPOSE 8080
 CMD ["node", "backend/index.js"]
 `
 	case "Rust (Actix-web)":
-		backendContent = `# --- Rust Actix Pipeline ---
-FROM rust:1.75 as builder
+		dockerfileContent += `# --- Stage 3: Rust Compilation Pipe ---
+FROM rust:1.75 AS rust-builder
 WORKDIR /app
 COPY backend/ ./backend/
 WORKDIR /app/backend
 RUN cargo build --release
 
-FROM debian:bookworm-slim
+# --- Stage 4: Rust Production Binary Target ---
+FROM debian:bookworm-slim AS backend-runtime
 WORKDIR /root/
-COPY --from=builder /app/backend/target/release/backend ./main
+COPY --from=rust-builder /app/backend/target/release/backend ./main
 EXPOSE 8080
 CMD ["./main"]
 `
 	default: // Go (Golang)
-		backendContent = `# --- Go Deployment Core ---
-FROM golang:1.22-alpine AS builder
+		dockerfileContent += `# --- Stage 3: Go Compiler Core ---
+FROM golang:1.22-alpine AS go-builder
 WORKDIR /app
 COPY backend/ ./backend/
 WORKDIR /app/backend
 RUN go build -o main .
 
-FROM alpine:latest
+# --- Stage 4: Go Production Binary Target ---
+FROM alpine:latest AS backend-runtime
 WORKDIR /root/
-COPY --from=builder /app/backend/main .
+COPY --from=go-builder /app/backend/main .
 EXPOSE 8080
 CMD ["./main"]
 `
 	}
 
-	backPath := filepath.Join(basePath, "backend.Dockerfile")
-	return os.WriteFile(backPath, []byte(backendContent), 0644)
+	dockerfilePath := filepath.Join(basePath, "Dockerfile")
+	return os.WriteFile(dockerfilePath, []byte(dockerfileContent), 0644)
 }
 
-// generate serviceworkspace into custom folder structures cleanly
 func GenerateServiceWorkspace(customPath string, meta ProjectMetadata) error {
 	if err := os.MkdirAll(customPath, 0755); err != nil {
 		return fmt.Errorf("failed to provision target directory root: %w", err)

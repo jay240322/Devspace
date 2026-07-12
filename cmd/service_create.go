@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/manifoldco/promptui"
@@ -111,77 +110,49 @@ var createCmd = &cobra.Command{
 			return
 		}
 
-		// 6. DYNAMIC KUBERNETES PROMPTS
-		fmt.Println("\n⚙️  Configuring Advanced Kubernetes Deployment Options...")
-
-		replicaPrompt := promptui.Prompt{
-			Label:   "Enter number of active Pod Replicas (Must be >= 1)",
-			Default: "2",
-			Validate: func(input string) error {
-				val, err := strconv.Atoi(input)
-				if err != nil || val < 1 {
-					return fmt.Errorf("❌ Replicas must be a valid number greater than or equal to 1")
-				}
-				return nil
-			},
-		}
-		replicaStr, err := replicaPrompt.Run()
-		if err != nil {
-			fmt.Printf("Prompt failed: %v\n", err)
-			return
-		}
-		replicas, _ := strconv.Atoi(replicaStr)
-
-		serviceTypeSelect := promptui.Select{
-			Label: "Select Kubernetes Service Type Strategy",
-			Items: []string{"ClusterIP", "NodePort", "LoadBalancer"},
-		}
-		_, serviceType, err := serviceTypeSelect.Run()
-		if err != nil {
-			fmt.Printf("Selection failed: %v\n", err)
-			return
+		// Determine backend port and health path based on backend tier
+		var backendPort int
+		switch backend {
+		case "Node.js (Express)":
+			backendPort = 8080
+		case "Rust (Actix-web)":
+			backendPort = 8080
+		case "Python (Django)":
+			backendPort = 8080
+		default: // Go (Golang)
+			backendPort = 8080
 		}
 
-		cpuSelect := promptui.Select{
-			Label: "Allocate Core CPU Compute Request Footprint",
-			Items: []string{"100m", "250m", "500m", "1"},
-		}
-		_, cpuRequest, err := cpuSelect.Run()
-		if err != nil {
-			fmt.Printf("Selection failed: %v\n", err)
-			return
+		backendHealthPath := "/api/health"
+
+		// Determine frontend port, service port, and health path based on frontend tier
+		var frontendPort int
+		var frontendServicePort int
+		var frontendHealthPath string
+
+		if frontend != "None (Pure Backend API)" {
+			if strings.Contains(frontend, "Next.js") {
+				frontendPort = 3000
+				frontendServicePort = 3000
+				frontendHealthPath = "/"
+			} else {
+				frontendPort = 80
+				frontendServicePort = 80
+				frontendHealthPath = "/"
+			}
 		}
 
-		memSelect := promptui.Select{
-			Label: "Allocate Memory (RAM) Compute Request Footprint",
-			Items: []string{"128Mi", "256Mi", "512Mi", "1Gi"},
-		}
-		_, memoryRequest, err := memSelect.Run()
-		if err != nil {
-			fmt.Printf("Selection failed: %v\n", err)
-			return
-		}
-
-		// Plan Summary Output (Using fixed Printf formatting verbs)
-		fmt.Println("\n -- Full-stack plan Created Successfully!\n")
-		fmt.Printf("Path: %s\n", targetDir)
-		fmt.Printf("Service Name: %s\n", serviceName)
-		fmt.Printf("Backend : %s\n", backend)
-		fmt.Printf("Frontend : %s\n", frontend)
-		fmt.Printf("K8s Replicas: %d\n", replicas)
-		fmt.Printf("K8s Service Type: %s\n", serviceType)
-
-		// 7. Generate standard framework boilerplates
 		meta := templates.ProjectMetadata{
-			TargetDir:      targetDir,
-			ServiceName:    serviceName,
-			Backend:        backend,
-			Frontend:       frontend,
-			GitHubUser:     "patel-jay",
-			K8sReplicas:    replicas,
-			K8sServiceType: serviceType,
-			K8sCpuRequest:  cpuRequest,
-			K8sMemRequest:  memoryRequest,
+			TargetDir:           targetDir,
+			ServiceName:         serviceName,
+			Backend:             backend,
+			Frontend:            frontend,
+			GitHubUser:          "patel-jay",
+			BackendPort:         backendPort,
+			BackendHealthPath:   backendHealthPath,
+			FrontendPort:        frontendPort,
+			FrontendServicePort: frontendServicePort,
+			FrontendHealthPath:  frontendHealthPath,
 		}
 
 		err = templates.GenerateBoilerplate(meta)

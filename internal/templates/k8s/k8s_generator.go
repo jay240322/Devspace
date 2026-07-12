@@ -9,12 +9,11 @@ import (
 	"text/template"
 )
 
-// K8sManifestVars represents the options passed from the CLI/orchestrator
 type K8sManifestVars struct {
 	ServiceName   string
 	ImageName     string
 	ContainerPort int
-	ServicePort   int 
+	ServicePort   int
 	ServiceType   string
 	Replicas      int
 	CpuRequest    string

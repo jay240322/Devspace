@@ -3,10 +3,10 @@ package cmd
 import (
 	"devspace/internal/config"
 	"devspace/internal/templates"
-	"devspace/internal/templates/k8s" // Integrates the four-manifest generation engine
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/manifoldco/promptui"
@@ -110,58 +110,75 @@ var createCmd = &cobra.Command{
 			return
 		}
 
-		// Determine backend port and health path based on backend tier
-		var backendPort int
-		switch backend {
-		case "Node.js (Express)":
-			backendPort = 8080
-		case "Rust (Actix-web)":
-			backendPort = 8080
-		case "Python (Django)":
-			backendPort = 8080
-		default: // Go (Golang)
-			backendPort = 8080
+		// 6. Advanced Kubernetes Interactive Prompts
+		
+		// A. Replicas Prompt
+		replicaPrompt := promptui.Prompt{
+			Label:   "Enter number of Kubernetes Replicas",
+			Default: "1",
+			Validate: func(input string) error {
+				val, err := strconv.Atoi(input)
+				if err != nil || val <= 0 {
+					return fmt.Errorf("❌ Replicas must be a positive integer greater than 0")
+				}
+				return nil
+			},
 		}
-
-		backendHealthPath := "/api/health"
-
-		// Determine frontend port, service port, and health path based on frontend tier
-		var frontendPort int
-		var frontendServicePort int
-		var frontendHealthPath string
-
-		if frontend != "None (Pure Backend API)" {
-			if strings.Contains(frontend, "Next.js") {
-				frontendPort = 3000
-				frontendServicePort = 3000
-				frontendHealthPath = "/"
-			} else {
-				frontendPort = 80
-				frontendServicePort = 80
-				frontendHealthPath = "/"
-			}
-		}
-
-		meta := templates.ProjectMetadata{
-			TargetDir:           targetDir,
-			ServiceName:         serviceName,
-			Backend:             backend,
-			Frontend:            frontend,
-			GitHubUser:          "patel-jay",
-			BackendPort:         backendPort,
-			BackendHealthPath:   backendHealthPath,
-			FrontendPort:        frontendPort,
-			FrontendServicePort: frontendServicePort,
-			FrontendHealthPath:  frontendHealthPath,
-		}
-
-		err = templates.GenerateBoilerplate(meta)
+		replicaStr, err := replicaPrompt.Run()
 		if err != nil {
-			fmt.Printf("Generation Failed: %v\n", err)
+			fmt.Printf("Prompt failed: %v\n", err)
+			return
+		}
+		replicas, _ := strconv.Atoi(replicaStr)
+
+		// B. CPU Allocation Prompt
+		cpuPrompt := promptui.Prompt{
+			Label:   "Enter CPU Request limit (e.g., 100m, 250m, 500m)",
+			Default: "100m",
+			Validate: func(input string) error {
+				if strings.TrimSpace(input) == "" {
+					return fmt.Errorf("❌ CPU allocation cannot be empty")
+				}
+				return nil
+			},
+		}
+		cpuRequest, err := cpuPrompt.Run()
+		if err != nil {
+			fmt.Printf("Prompt failed: %v\n", err)
+			return
+		}
+		cpuRequest = strings.TrimSpace(cpuRequest)
+
+		// C. Memory Allocation Prompt
+		memPrompt := promptui.Prompt{
+			Label:   "Enter Memory Request limit (e.g., 128Mi, 256Mi, 512Mi)",
+			Default: "128Mi",
+			Validate: func(input string) error {
+				if strings.TrimSpace(input) == "" {
+					return fmt.Errorf("❌ Memory allocation cannot be empty")
+				}
+				return nil
+			},
+		}
+		memoryRequest, err := memPrompt.Run()
+		if err != nil {
+			fmt.Printf("Prompt failed: %v\n", err)
+			return
+		}
+		memoryRequest = strings.TrimSpace(memoryRequest)
+
+		// D. Backend Service Edge Protocol Selection Prompt
+		serviceTypeSelect := promptui.Select{
+			Label: "Select Kubernetes Service Routing Type",
+			Items: []string{"ClusterIP", "NodePort", "LoadBalancer"},
+		}
+		_, serviceType, err := serviceTypeSelect.Run()
+		if err != nil {
+			fmt.Printf("Selection failed: %v\n", err)
 			return
 		}
 
-		// Calculate the exact target workspace subdirectory mapping
+		// Calculate the exact target workspace subdirectory mapping safely
 		var finalK8sDir string
 		if targetDir == "." {
 			wd, _ := os.Getwd()
@@ -170,71 +187,25 @@ var createCmd = &cobra.Command{
 			finalK8sDir = filepath.Join(filepath.Clean(targetDir), serviceName)
 		}
 
-		// Sanitize inputs to ensure zero formatting issues in Kubernetes templates
-		cpuRequest = strings.TrimSpace(cpuRequest)
-		memoryRequest = strings.TrimSpace(memoryRequest)
-
-		// Dynamically assign correct internal ports based on backend type
-		var backendPort int
-		switch backend {
-		case "Rust (Actix-web)":
-			backendPort = 8080
-		case "Node.js (Express)":
-			backendPort = 8080
-		case "Python (Django)":
-			backendPort = 8000
-		default:
-			backendPort = 8080
+		// Ship data parameters downstream to structural engine using a pointer
+		meta := templates.ProjectMetadata{
+			TargetDir:      targetDir,
+			ServiceName:    serviceName,
+			Backend:        backend,
+			Frontend:       frontend,
+			GitHubUser:     "patel-jay",
+			K8sReplicas:    replicas,
+			K8sServiceType: serviceType,
+			K8sCpuRequest:  cpuRequest,
+			K8sMemRequest:  strings.ReplaceAll(strings.ToUpper(memoryRequest), "MI", "Mi"),
 		}
 
-		// 8. Generate Separate Kubernetes Manifest files for BOTH Backend and Frontend
-		
-		// A. Generate Backend Deployment & Service Manifests
-		backendVars := k8s.K8sManifestVars{
-			ServiceName:   fmt.Sprintf("%s-backend", serviceName),
-			ImageName:     fmt.Sprintf("patel-jay/%s-backend", serviceName),
-			ContainerPort: backendPort,
-			ServicePort:   backendPort,
-			ServiceType:   serviceType,
-			Replicas:      replicas,
-			CpuRequest:    cpuRequest,
-			MemoryRequest: memoryRequest,
-			HealthPath:    "/api/health",
-		}
-
-		err = k8s.GenerateK8sManifestes(finalK8sDir, backendVars)
+		// 🟢 Call workspace generation seamlessly. Your generator.go pointer switch block 
+		// now correctly defines and applies ports and health paths out of the box!
+		err = templates.GenerateServiceWorkspace(finalK8sDir, &meta)
 		if err != nil {
-			fmt.Printf("❌ Backend Kubernetes manifest creation failed: %v\n", err)
+			fmt.Printf("Generation Failed: %v\n", err)
 			return
-		}
-
-		// B. Generate Frontend Deployment & Service Manifests (If frontend exists)
-		if frontend != "None (Pure Backend API)" {
-			var frontendPort int
-			// Using strings.Contains for resilient string matching against promptui outputs
-			if strings.Contains(frontend, "Next.js") {
-				frontendPort = 3000
-			} else {
-				frontendPort = 80 // Direct native Nginx fallback route for production bundles (React/Vue/Svelte)
-			}
-
-			frontendVars := k8s.K8sManifestVars{
-				ServiceName:   fmt.Sprintf("%s-frontend", serviceName),
-				ImageName:     fmt.Sprintf("patel-jay/%s-frontend", serviceName),
-				ContainerPort: frontendPort,
-				ServicePort:   80,
-				ServiceType:   "LoadBalancer", // Accessible standard edge routing 
-				Replicas:      replicas,
-				CpuRequest:    "100m",
-				MemoryRequest: "128Mi",
-				HealthPath:    "/",
-			}
-
-			err = k8s.GenerateK8sManifestes(finalK8sDir, frontendVars)
-			if err != nil {
-				fmt.Printf("❌ Frontend Kubernetes manifest creation failed: %v\n", err)
-				return
-			}
 		}
 
 		fmt.Println("\nYour customizable, ready-made microservice architecture is ready to launch!")

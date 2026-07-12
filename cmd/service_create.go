@@ -131,41 +131,41 @@ var createCmd = &cobra.Command{
 		}
 		replicas, _ := strconv.Atoi(replicaStr)
 
-		// B. CPU Allocation Prompt
-		cpuPrompt := promptui.Prompt{
-			Label:   "Enter CPU Request limit (e.g., 100m, 250m, 500m)",
-			Default: "100m",
-			Validate: func(input string) error {
-				if strings.TrimSpace(input) == "" {
-					return fmt.Errorf("❌ CPU allocation cannot be empty")
-				}
-				return nil
+		// B. CPU Allocation selection
+		cpuSelect := promptui.Select{
+			Label: "Select CPU Request Limit Profile",
+			Items: []string{
+				"100m (Lightweight - Recommended for Node/Go)",
+				"250m (Medium - Good for Python/Django)",
+				"500m (High Performance)",
+				"1000m (1 Full Core - Heavy Load)",
 			},
 		}
-		cpuRequest, err := cpuPrompt.Run()
+		_, selectedCpu, err := cpuSelect.Run()
 		if err != nil {
-			fmt.Printf("Prompt failed: %v\n", err)
+			fmt.Printf("Selection failed: %v\n", err)
 			return
 		}
-		cpuRequest = strings.TrimSpace(cpuRequest)
+		// Extract just the core Kubernetes value (e.g., "100m") from the selection string
+		cpuRequest := strings.Split(selectedCpu, " ")[0]
 
-		// C. Memory Allocation Prompt
-		memPrompt := promptui.Prompt{
-			Label:   "Enter Memory Request limit (e.g., 128Mi, 256Mi, 512Mi)",
-			Default: "128Mi",
-			Validate: func(input string) error {
-				if strings.TrimSpace(input) == "" {
-					return fmt.Errorf("❌ Memory allocation cannot be empty")
-				}
-				return nil
+		// C. Memory Allocation selection
+		memSelect := promptui.Select{
+			Label: "Select Memory Request Limit Profile",
+			Items: []string{
+				"128Mi (Micro - Light API instances)",
+				"256Mi (Standard - Recommended)",
+				"512Mi (Enhanced - Heavy caching/dependencies)",
+				"1024Mi (1GiB - High volume production)",
 			},
 		}
-		memoryRequest, err := memPrompt.Run()
+		_, selectedMem, err := memSelect.Run()
 		if err != nil {
-			fmt.Printf("Prompt failed: %v\n", err)
+			fmt.Printf("Selection failed: %v\n", err)
 			return
 		}
-		memoryRequest = strings.TrimSpace(memoryRequest)
+		// Extract just the core Kubernetes profile value (e.g., "128Mi") safely
+		memoryRequest := strings.Split(selectedMem, " ")[0]
 
 		// D. Backend Service Edge Protocol Selection Prompt
 		serviceTypeSelect := promptui.Select{

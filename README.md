@@ -249,3 +249,4 @@ Deploy to Kubernetes
         ▼
 Application Running 🚀
 ```
+### Adding githubations/jenkins templates selection

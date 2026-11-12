@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"devspace/internal/config"
 	"devspace/internal/templates"
 	"fmt"
 	"os"
@@ -13,69 +12,55 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func init(){
+func init() {
 	RootCmd.AddCommand(createCmd)
 }
 
 var createCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create and provision a new microservice instantly",
-	Run: func(cmd *cobra.Command, args []string){
+	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println("Initializing Devspace Service Provisioner..")
-		
-		// 1. Security validation
-		_, err := config.LoadConfig()
-		if err != nil {
-			fmt.Printf("Security validation failed: %v\n", err)
-			fmt.Println("Run 'set GITHUB_TOKEN=your_token' in terminal before running this tool")
-			os.Exit(1)
-		}
 
-		// 2. Destination target directory path prompt
+		// 2. Project location
 		pathPrompt := promptui.Prompt{
-			Label:   "Enter full path destination where microservice should be built (use . for current directory)",
-			Default: ".",
+			Label:       "Project location (Enter = current folder)",
+			HideEntered: true,
 			Validate: func(input string) error {
-				if input == "." {
-					return nil
-				}
-				cleanPath := filepath.Clean(input)
-				info, err := os.Stat(cleanPath)
-				if os.IsNotExist(err) {
-					return fmt.Errorf("❌ Path does not exist! Please enter a valid path")
-				}
-				if err != nil {
-					return fmt.Errorf("❌ Error reading path: %v", err)
-				}
-				if !info.IsDir() {
-					return fmt.Errorf("❌ Target path is a file, not a folder")
-				}
-				return nil
+				_, err := resolveProjectDirectory(input)
+				return err
 			},
 		}
-		targetDir, err := pathPrompt.Run()
+
+		enteredPath, err := pathPrompt.Run()
 		if err != nil {
-			fmt.Printf("Prompt failed: %v\n", err)
+			fmt.Printf("Prompt cancelled: %v\n", err)
 			return
 		}
 
-		// 3. Service name prompt
-		namePrompt := promptui.Prompt{
-			Label: "Enter microservice name",
-			Validate: func(input string) error {
-				if strings.TrimSpace(input) == "" {
-					return fmt.Errorf("❌ Service name cannot be blank")
-				}
-				return nil
-			},
-		}
-		serviceName, err := namePrompt.Run()
+		targetDir, err := resolveProjectDirectory(enteredPath)
 		if err != nil {
-			fmt.Printf("Prompt failed: %v\n", err)
+			fmt.Printf("Invalid project location: %v\n", err)
 			return
 		}
-		// Sanitize to lowercase for Kubernetes compatibility
-		serviceName = strings.ToLower(strings.ReplaceAll(serviceName, " ", "-"))
+
+		fmt.Println("Project directory:", targetDir)
+
+		// 3. Service name
+		namePrompt := promptui.Prompt{
+			Label:       "Service name (example: trial-1)",
+			HideEntered: true,
+			Validate:    validateServiceName,
+		}
+
+		enteredName, err := namePrompt.Run()
+		if err != nil {
+			fmt.Printf("Prompt cancelled: %v\n", err)
+			return
+		}
+
+		serviceName := normalizeServiceName(enteredName)
+		fmt.Println("Service name:", serviceName)
 
 		// 4. Backend selection prompt
 		langSelect := promptui.Select{
@@ -111,7 +96,7 @@ var createCmd = &cobra.Command{
 		}
 
 		// 6. Advanced Kubernetes Interactive Prompts
-		
+
 		// A. Replicas Prompt
 		replicaPrompt := promptui.Prompt{
 			Label:   "Enter number of Kubernetes Replicas",
@@ -200,7 +185,7 @@ var createCmd = &cobra.Command{
 			K8sMemRequest:  strings.ReplaceAll(strings.ToUpper(memoryRequest), "MI", "Mi"),
 		}
 
-		// 🟢 Call workspace generation seamlessly. Your generator.go pointer switch block 
+		// 🟢 Call workspace generation seamlessly. Your generator.go pointer switch block
 		// now correctly defines and applies ports and health paths out of the box!
 		err = templates.GenerateServiceWorkspace(finalK8sDir, &meta)
 		if err != nil {

@@ -1,0 +1,38 @@
+{
+  "name": "devspace-kit",
+  "version": "1.2.0",
+  "description": "Interactive CLI for scaffolding applications, Docker and Kubernetes configurations",
+  "license": "Apache-2.0",
+  "type": "commonjs",
+  "bin": {
+    "devspace": "bin/devspace.js"
+  },
+  "files": [
+    "bin/devspace.js",
+    "bin/devspace-win32-x64.exe",
+    "bin/devspace-darwin-x64",
+    "bin/devspace-darwin-arm64",
+    "bin/devspace-linux-x64",
+    "bin/devspace-linux-arm64",
+    "scripts/install.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "os": ["win32", "darwin", "linux"],
+  "cpu": ["x64", "arm64"],
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jay240322/Devspace.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/build.js",
+    "prepack": "npm run build",
+    "postinstall": "node scripts/install.js"
+  }
+}

@@ -3,6 +3,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { version } = require("../package.json");
 const root = path.resolve(__dirname, "..");
 const binDirectory = path.join(root, "bin");
 
@@ -44,7 +45,7 @@ for (const target of targets) {
     [
       "build",
       "-trimpath",
-      "-ldflags=-s -w",
+      "-ldflags=-s -w -X devspace/cmd.Version=" + version,
       "-o",
       path.join(binDirectory, target.filename),
       "."

@@ -1,6 +1,6 @@
 {
   "name": "devspace-kit",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Interactive CLI for scaffolding applications, Docker and Kubernetes configurations",
   "license": "Apache-2.0",
   "type": "commonjs",
@@ -18,8 +18,15 @@
     "README.md",
     "LICENSE"
   ],
-  "os": ["win32", "darwin", "linux"],
-  "cpu": ["x64", "arm64"],
+  "os": [
+    "win32",
+    "darwin",
+    "linux"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
   "engines": {
     "node": ">=22"
   },
